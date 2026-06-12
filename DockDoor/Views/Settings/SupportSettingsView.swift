@@ -4,6 +4,7 @@ import SwiftUI
 struct SupportSettingsView: View {
     @ObservedObject var updaterState: UpdaterState
     @StateObject private var permissionsChecker = PermissionsChecker()
+    @Default(.hideDockDoorProBanner) private var hideDockDoorProBanner
 
     init(updaterState: UpdaterState) {
         self.updaterState = updaterState
@@ -12,6 +13,12 @@ struct SupportSettingsView: View {
     var body: some View {
         BaseSettingsView {
             VStack(alignment: .leading, spacing: 20) {
+                if !hideDockDoorProBanner {
+                    DockDoorProBanner {
+                        hideDockDoorProBanner = true
+                    }
+                }
+
                 permissionsSection
                 updatesSection
                 acknowledgmentsSection
@@ -31,6 +38,7 @@ struct SupportSettingsView: View {
                     isGranted: permissionsChecker.accessibilityPermission,
                     action: { SystemPreferencesHelper.openAccessibilityPreferences() }
                 )
+                .settingsSearchTarget("support.accessibility")
 
                 Divider().padding(.leading, 40)
 
@@ -41,6 +49,7 @@ struct SupportSettingsView: View {
                     isGranted: permissionsChecker.screenRecordingPermission,
                     action: { SystemPreferencesHelper.openScreenRecordingPreferences() }
                 )
+                .settingsSearchTarget("support.screenRecording")
             }
 
             Text("Changes to permissions require an app restart to take effect.")
@@ -96,6 +105,7 @@ struct SupportSettingsView: View {
                     .labelsHidden()
                     .frame(width: 100)
                 }
+                .settingsSearchTarget("support.updateChannel")
 
                 Divider().padding(.leading, 40)
 
@@ -119,6 +129,7 @@ struct SupportSettingsView: View {
                     .buttonStyle(AccentButtonStyle(small: true))
                     .disabled(!updaterState.canCheckForUpdates)
                 }
+                .settingsSearchTarget("support.checkForUpdates")
 
                 Divider().padding(.leading, 40)
 
@@ -142,20 +153,23 @@ struct SupportSettingsView: View {
                     ))
                     .labelsHidden()
                 }
+                .settingsSearchTarget("support.automaticUpdates")
 
                 Divider().padding(.leading, 40)
 
                 // Debug logging
                 DebugLoggingRow()
+                    .settingsSearchTarget("support.debugLogging")
             }
         }
     }
 
     private var lastCheckDescription: String {
         if let lastCheck = updaterState.lastUpdateCheckDate {
-            "Last checked: \(lastCheck.formatted(date: .abbreviated, time: .shortened))"
+            let formatted = lastCheck.formatted(date: .abbreviated, time: .shortened)
+            return String(localized: "Last checked: \(formatted)")
         } else {
-            "No recent checks"
+            return String(localized: "No recent checks")
         }
     }
 
@@ -234,6 +248,68 @@ struct SupportSettingsView: View {
                 )
             }
         }
+    }
+}
+
+private struct DockDoorProBanner: View {
+    private static let iconURL = URL(string: "https://pro.dockdoor.net/_astro/dockdoor-icon.DNTkj7IN_GoFVN.webp")!
+    private static let destinationURL = URL(string: "https://pro.dockdoor.net")!
+
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            proIcon
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(String(localized: "DockDoor Pro", comment: "DockDoor Pro banner title"))
+                    .font(.headline)
+
+                Text(String(localized: "A separate paid app that fully replaces the macOS Dock with profiles, widgets, file tray, media controls with lyrics, and a built-in switcher.", comment: "DockDoor Pro banner description"))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Link(destination: Self.destinationURL) {
+                    Label(String(localized: "Learn More", comment: "DockDoor Pro banner link"), systemImage: "arrow.up.right")
+                }
+                .buttonStyle(AccentButtonStyle(small: true))
+                .padding(.top, 2)
+            }
+
+            Spacer(minLength: 12)
+
+            Button(action: dismiss) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(String(localized: "Never show DockDoor Pro banner again", comment: "DockDoor Pro banner dismiss accessibility label"))
+            .help(String(localized: "Never show again", comment: "DockDoor Pro banner dismiss help text"))
+        }
+        .padding(14)
+        .background(Color(NSColor.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var proIcon: some View {
+        AsyncImage(url: Self.iconURL) { phase in
+            switch phase {
+            case let .success(image):
+                image
+                    .resizable()
+                    .scaledToFit()
+            default:
+                Image(systemName: "sparkles")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(.mint)
+            }
+        }
+        .frame(width: 48, height: 48)
+        .background(Color.mint.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 

@@ -3,11 +3,11 @@ import SwiftUI
 
 struct GeneralAppearanceSection: View {
     @Default(.uniformCardRadius) var uniformCardRadius
-    @Default(.useLiquidGlass) var useLiquidGlass
     @Default(.globalPaddingMultiplier) var globalPaddingMultiplier
     @Default(.unselectedContentOpacity) var unselectedContentOpacity
-    @Default(.enableTitleMarquee) var enableTitleMarquee
+    @Default(.titleOverflowStyle) var titleOverflowStyle
     @Default(.showMinimizedHiddenLabels) var showMinimizedHiddenLabels
+    @Default(.showWindowlessAppQuitButton) var showWindowlessAppQuitButton
     @Default(.hidePreviewCardBackground) var hidePreviewCardBackground
     @Default(.hideHoverContainerBackground) var hideHoverContainerBackground
     @Default(.hideWidgetContainerBackground) var hideWidgetContainerBackground
@@ -23,14 +23,9 @@ struct GeneralAppearanceSection: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .settingsSearchTarget("appearance.theme")
                 .onChange(of: appAppearanceMode) { newMode in
                     applyAppearanceMode(newMode)
-                }
-
-                if #available(macOS 26.0, *) {
-                    Toggle(isOn: $useLiquidGlass) {
-                        Text("Use Liquid Glass (macOS 26+)")
-                    }
                 }
 
                 sliderSetting(
@@ -46,6 +41,7 @@ struct GeneralAppearanceSection: View {
                         return f
                     }()
                 )
+                .settingsSearchTarget("appearance.spacingScale")
 
                 sliderSetting(
                     title: "Unselected Content Opacity",
@@ -55,11 +51,13 @@ struct GeneralAppearanceSection: View {
                     unit: "",
                     formatter: NumberFormatter.percentFormatter
                 )
+                .settingsSearchTarget("appearance.unselectedOpacity")
 
                 VStack(alignment: .leading) {
                     Toggle(isOn: $uniformCardRadius) {
                         Text("Rounded corners")
                     }
+                    .settingsSearchTarget("appearance.roundedCorners")
                     Text("Round the corners of window preview images for a modern look.")
                         .font(.footnote)
                         .foregroundColor(.gray)
@@ -67,10 +65,13 @@ struct GeneralAppearanceSection: View {
                 }
 
                 VStack(alignment: .leading) {
-                    Toggle(isOn: $enableTitleMarquee) {
-                        Text("Scroll long titles (marquee)")
+                    Picker("Long title overflow", selection: $titleOverflowStyle) {
+                        ForEach(TitleOverflowStyle.allCases, id: \.self) { style in
+                            Text(style.localizedName).tag(style)
+                        }
                     }
-                    Text("When disabled, long titles remain static instead of scrolling.")
+                    .settingsSearchTarget("appearance.marquee")
+                    Text("How to display window titles that are too long to fit.")
                         .font(.footnote)
                         .foregroundColor(.gray)
                         .padding(.leading, 20)
@@ -80,7 +81,19 @@ struct GeneralAppearanceSection: View {
                     Toggle(isOn: $showMinimizedHiddenLabels) {
                         Text("Distinguish minimized/hidden windows")
                     }
+                    .settingsSearchTarget("appearance.distinguishMinimized")
                     Text("When enabled, shows visual indicators and dims minimized/hidden windows. When disabled, treats them as normal windows with full functionality.")
+                        .font(.footnote)
+                        .foregroundColor(.gray)
+                        .padding(.leading, 20)
+                }
+
+                VStack(alignment: .leading) {
+                    Toggle(isOn: $showWindowlessAppQuitButton) {
+                        Text("Show quit button for apps with no open windows")
+                    }
+                    .settingsSearchTarget("appearance.windowlessQuitButton")
+                    Text("Shows a quit-only control on previews for running apps with no open windows.")
                         .font(.footnote)
                         .foregroundColor(.gray)
                         .padding(.leading, 20)
@@ -90,6 +103,7 @@ struct GeneralAppearanceSection: View {
                     Toggle(isOn: $hidePreviewCardBackground) {
                         Text("Hide preview card background")
                     }
+                    .settingsSearchTarget("appearance.hidePreviewBackground")
                     Text("Removes the background panel from individual window previews.")
                         .font(.footnote)
                         .foregroundColor(.gray)
@@ -100,6 +114,7 @@ struct GeneralAppearanceSection: View {
                     Toggle(isOn: $hideHoverContainerBackground) {
                         Text("Hide hover container background")
                     }
+                    .settingsSearchTarget("appearance.hideContainerBackground")
                     Text("Removes the container background from window preview panels.")
                         .font(.footnote)
                         .foregroundColor(.gray)
@@ -110,6 +125,7 @@ struct GeneralAppearanceSection: View {
                     Toggle(isOn: $hideWidgetContainerBackground) {
                         Text("Hide widget container background")
                     }
+                    .settingsSearchTarget("appearance.hideWidgetBackground")
                     Text("Removes the container background from widget panels (media controls, calendar).")
                         .font(.footnote)
                         .foregroundColor(.gray)
@@ -120,6 +136,7 @@ struct GeneralAppearanceSection: View {
                     Toggle(isOn: $showActiveWindowBorder) {
                         Text("Show active window border")
                     }
+                    .settingsSearchTarget("appearance.activeBorder")
                     Text("Highlights the currently focused window with a colored border.")
                         .font(.footnote)
                         .foregroundColor(.gray)

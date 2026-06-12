@@ -18,7 +18,7 @@ let calendarAppIdentifier = "com.apple.iCal"
     guard let bundleId = bundleIdentifier else { return false }
     switch Defaults[.mediaDetectionMode] {
     case .universal:
-        return bundleId == MediaRemoteService.shared.activeBundleIdentifier
+        return MediaRemoteService.shared.matchesMediaSource(bundleIdentifier: bundleId)
     case .appleScriptOnly:
         return bundleId == spotifyAppIdentifier || bundleId == appleMusicAppIdentifier
     }
@@ -39,9 +39,23 @@ extension Defaults.Keys {
     static let switcherBackwardKeyCode = Key<UInt16>("switcherBackwardKeyCode", default: 56)
     static let shouldHideOnDockItemClick = Key<Bool>("shouldHideOnDockItemClick", default: false)
     static let dockClickAction = Key<DockClickAction>("dockClickAction", default: .hide)
+    static let restoreAllMinimizedWindowsOnDockClick = Key<Bool>("restoreAllMinimizedWindowsOnDockClick", default: true)
     static let enableCmdRightClickQuit = Key<Bool>("enableCmdRightClickQuit", default: true)
     static let quitAppOnWindowClose = Key<Bool>("quitAppOnWindowClose", default: false)
     static let enableDockScrollGesture = Key<Bool>("enableDockScrollGesture", default: false)
+    static let enableTitleBarScrollGesture = Key<Bool>("enableTitleBarScrollGesture", default: false)
+    static let titleBarScrollCenteredWindowScale = Key<CGFloat>("titleBarScrollCenteredWindowScale", default: 0.8)
+    static let titleBarScrollCenteredWindowSizingMode = Key<TitleBarCenteredWindowSizingMode>("titleBarScrollCenteredWindowSizingMode", default: .uniform)
+    static let titleBarScrollCenteredWindowWidthScale = Key<CGFloat>("titleBarScrollCenteredWindowWidthScale", default: 0.8)
+    static let titleBarScrollCenteredWindowHeightScale = Key<CGFloat>("titleBarScrollCenteredWindowHeightScale", default: 0.8)
+    static let titleBarScrollCenteredWindowLockAspectRatio = Key<Bool>("titleBarScrollCenteredWindowLockAspectRatio", default: false)
+    static let titleBarScrollRestoreWindowInterval = Key<CGFloat>("titleBarScrollRestoreWindowInterval", default: 1.5)
+
+    // Dock Locking
+    static let enableDockLocking = Key<Bool>("enableDockLocking", default: false)
+    static let lockedDockScreenIdentifier = Key<String>("lockedDockScreenIdentifier", default: "")
+    static let dockLockOverrideModifier = Key<Int>("dockLockOverrideModifier", default: DockLockModifier.option.rawValue)
+    static let dockIconScrollBehavior = Key<DockIconScrollBehavior>("dockIconScrollBehavior", default: .activateHide)
     static let dockIconMediaScrollBehavior = Key<DockIconMediaScrollBehavior>("dockIconMediaScrollBehavior", default: .adjustVolume)
     static let mediaWidgetScrollBehavior = Key<MediaWidgetScrollBehavior>("mediaWidgetScrollBehavior", default: .seekPlayback)
     static let mediaWidgetScrollDirection = Key<MediaWidgetScrollDirection>("mediaWidgetScrollDirection", default: .vertical)
@@ -74,6 +88,15 @@ extension Defaults.Keys {
     static let enableMediaWidget = Key<Bool>("enableMediaWidget", default: true)
     static let mediaDetectionMode = Key<MediaDetectionMode>("mediaDetectionMode", default: .universal)
     static let enableCalendarWidget = Key<Bool>("enableCalendarWidget", default: true)
+    static let enableDockItemWidgets = Key<Bool>("enableDockItemWidgets", default: true)
+    static let enableFolderWidget = Key<Bool>("enableFolderWidget", default: true)
+    static let folderWidgetDefaultSortOrder = Key<FolderWidgetSortOrder>("folderWidgetDefaultSortOrder", default: .dateModified)
+    static let folderWidgetDefaultSortReversed = Key<Bool>("folderWidgetDefaultSortReversed", default: true)
+    static let folderWidgetRememberSortPerFolder = Key<Bool>("folderWidgetRememberSortPerFolder", default: true)
+    static let folderWidgetSortOrders = Key<[String: FolderWidgetSortOrder]>("folderWidgetSortOrders", default: [:])
+    static let folderWidgetSortReversed = Key<[String: Bool]>("folderWidgetSortReversed", default: [:])
+    static let folderWidgetShowHiddenFiles = Key<Bool>("folderWidgetShowHiddenFiles", default: false)
+    static let folderWidgetAuthorizedBookmarks = Key<[String: String]>("folderWidgetAuthorizedBookmarks", default: [:])
     static let useEmbeddedMediaControls = Key<Bool>("useEmbeddedMediaControls", default: true)
     static let useEmbeddedDockPreviewElements = Key<Bool>("useEmbeddedDockPreviewElements", default: false)
     static let disableDockStyleTrafficLights = Key<Bool>("disableDockStyleTrafficLights", default: false)
@@ -108,10 +131,12 @@ extension Defaults.Keys {
     static let enableVimMotions = Key<Bool>("enableVimMotions", default: false)
     static let passArrowsThroughToSystem = Key<Bool>("passArrowsThroughToSystem", default: false)
     static let enableWindowSwitcherSearch = Key<Bool>("enableWindowSwitcherSearch", default: false)
+    static let focusSearchOnWindowSwitcherOpen = Key<Bool>("focusSearchOnWindowSwitcherOpen", default: false)
     static let searchTriggerKey = Key<UInt16>("searchTriggerKey", default: UInt16(kVK_ANSI_Slash))
     static let compactModeTitleFormat = Key<CompactModeTitleFormat>("compactModeTitleFormat", default: .appNameAndTitle)
     static let compactModeItemSize = Key<CompactModeItemSize>("compactModeItemSize", default: .medium)
     static let compactModeHideTrafficLights = Key<Bool>("compactModeHideTrafficLights", default: false)
+    static let showWindowlessAppQuitButton = Key<Bool>("showWindowlessAppQuitButton", default: true)
 
     // Per-feature compact mode thresholds (0 = disabled, 1+ = enable when window count >= threshold)
     static let windowSwitcherCompactThreshold = Key<Int>("windowSwitcherCompactThreshold", default: 0)
@@ -122,10 +147,15 @@ extension Defaults.Keys {
     static let includeHiddenWindowsInSwitcher = Key<Bool>("includeHiddenWindowsInSwitcher", default: true)
     static let includeHiddenWindowsInDockPreview = Key<Bool>("includeHiddenWindowsInDockPreview", default: true)
     static let includeHiddenWindowsInCmdTab = Key<Bool>("includeHiddenWindowsInCmdTab", default: true)
+    static let showWindowlessAppsInSwitcher = Key<Bool>("showWindowlessAppsInSwitcher", default: true)
+    static let showWindowlessAppsInDockPreview = Key<Bool>("showWindowlessAppsInDockPreview", default: false)
+    static let showWindowlessAppsInCmdTab = Key<Bool>("showWindowlessAppsInCmdTab", default: false)
+    static let openNewWindowForWindowlessApps = Key<Bool>("openNewWindowForWindowlessApps", default: false)
     static let ignoreAppsWithSingleWindow = Key<Bool>("ignoreAppsWithSingleWindow", default: false)
+    static let ignoreAppsWithSingleWindowInCmdTab = Key<Bool>("ignoreAppsWithSingleWindowInCmdTab", default: false)
     static let groupAppInstancesInDock = Key<Bool>("groupAppInstancesInDock", default: true)
-    static let useLiquidGlass = Key<Bool>("useLiquidGlass", default: true)
     static let showMenuBarIcon = Key<Bool>("showMenuBarIcon", default: true)
+    static let hideDockDoorProBanner = Key<Bool>("hideDockDoorProBanner", default: false)
     static let raisedWindowLevel = Key<Bool>("raisedWindowLevel", default: true)
     static let launched = Key<Bool>("launched", default: false)
     static let reopenSettingsAfterRestart = Key<Bool>("reopenSettingsAfterRestart", default: false)
@@ -149,6 +179,17 @@ extension Defaults.Keys {
     static let appAppearanceMode = Key<AppAppearanceMode>("appAppearanceMode", default: .system)
     static let showActiveWindowBorder = Key<Bool>("showActiveWindowBorder", default: false)
 
+    // MARK: - Glass Effect
+
+    static let dockBackgroundStyle = Key<DockBackgroundStyle>("dockBackgroundStyle", default: .liquidGlass)
+    static let dockGlassOpacity = Key<CGFloat>("dockGlassOpacity", default: 0.95)
+    static let dockGlassBlurRadius = Key<CGFloat>("dockGlassBlurRadius", default: 0)
+    static let dockGlassSaturation = Key<CGFloat>("dockGlassSaturation", default: 1.0)
+    static let dockBackgroundTintOpacity = Key<CGFloat>("dockBackgroundTintOpacity", default: 0.3)
+    static let dockBackgroundBorderOpacity = Key<CGFloat>("dockBackgroundBorderOpacity", default: 0.15)
+    static let dockBackgroundBorderWidth = Key<CGFloat>("dockBackgroundBorderWidth", default: 1)
+    static let dockBackgroundMaterial = Key<DockBackgroundMaterial>("dockBackgroundMaterial", default: .ultraThin)
+
     // MARK: - Dock Preview Appearance Settings
 
     static let showWindowTitle = Key<Bool>("showWindowTitle", default: true)
@@ -156,7 +197,7 @@ extension Defaults.Keys {
     static let windowTitleDisplayCondition = Key<WindowTitleDisplayCondition>("windowTitleDisplayCondition", default: .all)
     static let windowTitleVisibility = Key<WindowTitleVisibility>("windowTitleVisibility", default: .alwaysVisible)
     static let windowTitlePosition = Key<WindowTitlePosition>("windowTitlePosition", default: .bottomLeft)
-    static let enableTitleMarquee = Key<Bool>("enableTitleMarquee", default: true)
+    static let titleOverflowStyle = Key<TitleOverflowStyle>("titleOverflowStyle", default: .truncateMiddle)
     static let windowTitleFontSize = Key<WindowTitleFontSize>("windowTitleFontSize", default: .system)
     static let trafficLightButtonsVisibility = Key<TrafficLightButtonsVisibility>("trafficLightButtonsVisibility", default: .dimmedOnPreviewHover)
     static let trafficLightButtonsPosition = Key<TrafficLightButtonsPosition>("trafficLightButtonsPosition", default: .topLeft)
@@ -167,11 +208,14 @@ extension Defaults.Keys {
 
     // MARK: - Window Switcher Appearance Settings
 
+    static let switcherShowAppHeader = Key<Bool>("switcherShowAppHeader", default: true)
     static let switcherShowWindowTitle = Key<Bool>("switcherShowWindowTitle", default: true)
     static let switcherWindowTitleVisibility = Key<WindowTitleVisibility>("switcherWindowTitleVisibility", default: .alwaysVisible)
+    static let switcherAppIconSize = Key<CGFloat>("switcherAppIconSize", default: 0)
     static let switcherTrafficLightButtonsVisibility = Key<TrafficLightButtonsVisibility>("switcherTrafficLightButtonsVisibility", default: .dimmedOnPreviewHover)
     static let switcherEnabledTrafficLightButtons = Key<Set<WindowAction>>("switcherEnabledTrafficLightButtons", default: [.quit, .close, .minimize, .toggleFullScreen])
     static let switcherUseMonochromeTrafficLights = Key<Bool>("switcherUseMonochromeTrafficLights", default: false)
+    static let switcherUseEmbeddedDockPreviewElements = Key<Bool>("switcherUseEmbeddedDockPreviewElements", default: false)
     static let switcherDisableDockStyleTrafficLights = Key<Bool>("switcherDisableDockStyleTrafficLights", default: false)
 
     // MARK: - Cmd+Tab Appearance Settings
@@ -206,6 +250,10 @@ extension Defaults.Keys {
     static let dockPreviewControlPosition = Key<WindowSwitcherControlPosition>("dockPreviewControlPosition", default: .topTrailing)
     static let pinnedScreenIdentifier = Key<String>("pinnedScreenIdentifier", default: NSScreen.main?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? String ?? "")
 
+    // MARK: - Mouse Follows Focus
+
+    static let mouseFollowsFocusMode = Key<MouseFollowsFocusMode>("mouseFollowsFocusMode", default: .never)
+
     // MARK: - Window Switcher Filters
 
     static let limitSwitcherToFrontmostApp = Key<Bool>("limitSwitcherToFrontmostApp", default: false)
@@ -215,11 +263,13 @@ extension Defaults.Keys {
 
     static let appNameFilters = Key<[String]>("appNameFilters", default: [])
     static let windowTitleFilters = Key<[String]>("windowTitleFilters", default: [])
+    static let widgetAppFilters = Key<[String]>("widgetAppFilters", default: [])
     static let groupedAppsInSwitcher = Key<[String]>("groupedAppsInSwitcher", default: [])
     static let customAppDirectories = Key<[String]>("customAppDirectories", default: [])
     static let filteredCalendarIdentifiers = Key<[String]>("filteredCalendarIdentifiers", default: [])
     static let hasSeenCmdTabFocusHint = Key<Bool>("hasSeenCmdTabFocusHint", default: false)
     static let disableImagePreview = Key<Bool>("disableImagePreview", default: false)
+    static let lastKnownScreenRecordingPermission = Key<Bool>("lastKnownScreenRecordingPermission", default: false)
     static let debugMode = Key<Bool>("debugMode", default: false)
 
     // MARK: - Active App Indicator
@@ -273,6 +323,33 @@ extension Defaults.Keys {
 
     static let alternateKeybindKey = Key<UInt16>("alternateKeybindKey", default: 0)
     static let alternateKeybindMode = Key<SwitcherInvocationMode>("alternateKeybindMode", default: .activeAppOnly)
+}
+
+// MARK: Dock Locking
+
+enum DockLockModifier: Int, CaseIterable, Codable, Defaults.Serializable {
+    case option = 0
+    case control = 1
+    case shift = 2
+    case command = 3
+
+    var cgEventFlag: CGEventFlags {
+        switch self {
+        case .option: .maskAlternate
+        case .control: .maskControl
+        case .shift: .maskShift
+        case .command: .maskCommand
+        }
+    }
+
+    var localizedName: String {
+        switch self {
+        case .option: String(localized: "Option (\u{2325})")
+        case .control: String(localized: "Control (\u{2303})")
+        case .shift: String(localized: "Shift (\u{21E7})")
+        case .command: String(localized: "Command (\u{2318})")
+        }
+    }
 }
 
 // MARK: Display Configurations
@@ -359,6 +436,26 @@ enum WindowTitleVisibility: String, CaseIterable, Defaults.Serializable {
     }
 }
 
+enum TitleOverflowStyle: String, CaseIterable, Defaults.Serializable {
+    case truncateTail
+    case truncateMiddle
+    case truncateHead
+    case marquee
+
+    var localizedName: String {
+        switch self {
+        case .truncateTail:
+            String(localized: "Truncate end", comment: "Title overflow style option")
+        case .truncateMiddle:
+            String(localized: "Truncate middle", comment: "Title overflow style option")
+        case .truncateHead:
+            String(localized: "Truncate start", comment: "Title overflow style option")
+        case .marquee:
+            String(localized: "Marquee (scrolling)", comment: "Title overflow style option")
+        }
+    }
+}
+
 enum TrafficLightButtonsVisibility: String, CaseIterable, Defaults.Serializable {
     case never
     case dimmedOnPreviewHover
@@ -412,6 +509,23 @@ enum WindowSwitcherPlacementStrategy: String, CaseIterable, Defaults.Serializabl
             String(localized: "Screen with last active window", comment: "Window switcher placement option")
         case .pinnedToScreen:
             String(localized: "Pinned to screen", comment: "Window switcher placement option")
+        }
+    }
+}
+
+enum MouseFollowsFocusMode: String, CaseIterable, Defaults.Serializable {
+    case never
+    case always
+    case differentDisplayOnly
+
+    var localizedName: String {
+        switch self {
+        case .never:
+            String(localized: "Never", comment: "Mouse follows focus mode option")
+        case .always:
+            String(localized: "Always", comment: "Mouse follows focus mode option")
+        case .differentDisplayOnly:
+            String(localized: "Only when switching displays", comment: "Mouse follows focus mode option")
         }
     }
 }
@@ -635,6 +749,20 @@ enum MediaDetectionMode: String, CaseIterable, Defaults.Serializable {
     }
 }
 
+enum DockIconScrollBehavior: String, CaseIterable, Defaults.Serializable {
+    case activateHide
+    case bringAppWindowsToCurrentSpace
+
+    var localizedName: String {
+        switch self {
+        case .activateHide:
+            String(localized: "Activate/Hide", comment: "Dock icon scroll option")
+        case .bringAppWindowsToCurrentSpace:
+            String(localized: "Bring App Windows to Current Space", comment: "Dock icon scroll option")
+        }
+    }
+}
+
 // Dock icon scroll behavior for Music/Spotify
 enum DockIconMediaScrollBehavior: String, CaseIterable, Defaults.Serializable {
     case adjustVolume
@@ -646,6 +774,20 @@ enum DockIconMediaScrollBehavior: String, CaseIterable, Defaults.Serializable {
             String(localized: "Adjust volume", comment: "Dock icon media scroll option")
         case .activateHide:
             String(localized: "Activate/Hide (same as other apps)", comment: "Dock icon media scroll option")
+        }
+    }
+}
+
+enum TitleBarCenteredWindowSizingMode: String, CaseIterable, Defaults.Serializable {
+    case uniform
+    case separate
+
+    var localizedName: String {
+        switch self {
+        case .uniform:
+            String(localized: "Whole window", comment: "Title bar centered window sizing mode")
+        case .separate:
+            String(localized: "Width & height", comment: "Title bar centered window sizing mode")
         }
     }
 }
@@ -690,6 +832,44 @@ enum MediaWidgetScrollDirection: String, CaseIterable, Defaults.Serializable {
             String(localized: "Vertical", comment: "Media widget scroll direction option")
         case .horizontal:
             String(localized: "Horizontal", comment: "Media widget scroll direction option")
+        }
+    }
+}
+
+enum FolderWidgetSortOrder: String, CaseIterable, Defaults.Serializable {
+    case dateModified
+    case dateAdded
+    case name
+    case kind
+    case size
+
+    var localizedName: String {
+        switch self {
+        case .dateModified:
+            String(localized: "Date Modified", comment: "Folder widget sort option")
+        case .dateAdded:
+            String(localized: "Date Added", comment: "Folder widget sort option")
+        case .name:
+            String(localized: "Name", comment: "Folder widget sort option")
+        case .kind:
+            String(localized: "Kind", comment: "Folder widget sort option")
+        case .size:
+            String(localized: "Size", comment: "Folder widget sort option")
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .dateModified:
+            "calendar"
+        case .dateAdded:
+            "calendar.badge.plus"
+        case .name:
+            "textformat.abc"
+        case .kind:
+            "doc"
+        case .size:
+            "scalemass"
         }
     }
 }
@@ -1062,4 +1242,57 @@ enum WindowSwitcherLivePreviewScope: String, CaseIterable, Defaults.Serializable
             String(localized: "All windows get live preview (may cause lag with many windows)")
         }
     }
+}
+
+// MARK: - Dock Background
+
+enum DockBackgroundMaterial: String, CaseIterable, Defaults.Serializable {
+    case ultraThin, thin, regular, thick, ultraThick
+
+    var displayName: String {
+        switch self {
+        case .ultraThin:
+            String(localized: "Ultra Thin", comment: "Dock background material thickness option")
+        case .thin:
+            String(localized: "Thin", comment: "Dock background material thickness option")
+        case .regular:
+            String(localized: "Regular", comment: "Dock background material thickness option")
+        case .thick:
+            String(localized: "Thick", comment: "Dock background material thickness option")
+        case .ultraThick:
+            String(localized: "Ultra Thick", comment: "Dock background material thickness option")
+        }
+    }
+
+    var swiftUIMaterial: Material {
+        switch self {
+        case .ultraThin: .ultraThinMaterial
+        case .thin: .thinMaterial
+        case .regular: .regularMaterial
+        case .thick: .thickMaterial
+        case .ultraThick: .ultraThickMaterial
+        }
+    }
+}
+
+enum DockBackgroundStyle: String, CaseIterable, Defaults.Serializable {
+    case liquidGlass
+    case frostedMaterial
+    case clear
+
+    var displayName: String {
+        switch self {
+        case .liquidGlass:
+            String(localized: "Liquid Glass", comment: "Dock background style option")
+        case .frostedMaterial:
+            String(localized: "Frosted", comment: "Dock background style option")
+        case .clear:
+            String(localized: "Clear", comment: "Dock background style option")
+        }
+    }
+
+    @available(macOS 26.0, *)
+    static var allAvailable: [DockBackgroundStyle] { allCases }
+
+    static var preTahoe: [DockBackgroundStyle] { [.frostedMaterial, .clear] }
 }

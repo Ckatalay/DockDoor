@@ -124,7 +124,7 @@ class MouseTrackingNSView: NSView {
         guard let activeDockObserver = DockObserver.activeInstance else { return false }
         guard let originalDockItem = dockItemElement else { return false }
 
-        guard let currentDockItem = activeDockObserver.getHoveredApplicationDockItem() else { return false }
+        guard let currentDockItem = activeDockObserver.getHoveredDockItemElement() else { return false }
 
         return originalDockItem == currentDockItem
     }
@@ -152,7 +152,7 @@ class MouseTrackingNSView: NSView {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             guard SharedPreviewWindowCoordinator.activeInstance?.windowSwitcherCoordinator.windowSwitcherActive == false else { return }
-            guard dockPosition != .cmdTab else { return }
+            guard !DockObserver.isCmdTabSwitcherActive else { return }
 
             guard let window, window.alphaValue > 0 else { return }
 
@@ -187,8 +187,19 @@ class MouseTrackingNSView: NSView {
 
     private func performHideWindow(preventLastAppClear: Bool = false) {
         DispatchQueue.main.async { [weak self] in
-            guard self != nil else { return }
-            SharedPreviewWindowCoordinator.activeInstance?.hideWindow()
+            guard let self else { return }
+            let preservePendingShow = shouldPreservePendingShowForDockIconTransition()
+            SharedPreviewWindowCoordinator.activeInstance?.hideWindow(cancelPendingShow: !preservePendingShow)
         }
+    }
+
+    private func shouldPreservePendingShowForDockIconTransition() -> Bool {
+        guard dockPosition != .cli,
+              let activeDockObserver = DockObserver.activeInstance,
+              let originalDockItem = dockItemElement,
+              let currentDockItem = activeDockObserver.getHoveredDockItemElement()
+        else { return false }
+
+        return originalDockItem != currentDockItem
     }
 }

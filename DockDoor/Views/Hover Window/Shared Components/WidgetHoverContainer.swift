@@ -3,6 +3,7 @@ import SwiftUI
 
 struct WidgetHoverContainer<Content: View>: View {
     let appName: String
+    let bundleIdentifier: String
     let bestGuessMonitor: NSScreen
     let dockPosition: DockPosition
     let dockItemElement: AXUIElement?
@@ -10,6 +11,7 @@ struct WidgetHoverContainer<Content: View>: View {
     let appIcon: NSImage?
     let hoveringAppIcon: Bool
     let highlightColor: Color?
+    let backgroundAppearance: BackgroundAppearance
     let content: Content
 
     @Default(.showAppName) private var showAppTitleData
@@ -17,6 +19,7 @@ struct WidgetHoverContainer<Content: View>: View {
 
     init(
         appName: String,
+        bundleIdentifier: String,
         bestGuessMonitor: NSScreen,
         dockPosition: DockPosition,
         dockItemElement: AXUIElement?,
@@ -24,9 +27,11 @@ struct WidgetHoverContainer<Content: View>: View {
         appIcon: NSImage?,
         hoveringAppIcon: Bool,
         highlightColor: Color? = nil,
+        backgroundAppearance: BackgroundAppearance,
         @ViewBuilder content: () -> Content
     ) {
         self.appName = appName
+        self.bundleIdentifier = bundleIdentifier
         self.bestGuessMonitor = bestGuessMonitor
         self.dockPosition = dockPosition
         self.dockItemElement = dockItemElement
@@ -34,6 +39,7 @@ struct WidgetHoverContainer<Content: View>: View {
         self.appIcon = appIcon
         self.hoveringAppIcon = hoveringAppIcon
         self.highlightColor = highlightColor
+        self.backgroundAppearance = backgroundAppearance
         self.content = content()
     }
 
@@ -49,7 +55,8 @@ struct WidgetHoverContainer<Content: View>: View {
         SharedHoverAppTitle(
             appName: appName,
             appIcon: appIcon,
-            hoveringAppIcon: hoveringAppIcon
+            hoveringAppIcon: hoveringAppIcon,
+            backgroundAppearance: backgroundAppearance
         )
     }
 
@@ -67,21 +74,24 @@ struct WidgetHoverContainer<Content: View>: View {
                 }
                 .padding(.top, (appNameStyle == .popover && showAppTitleData) ? 30 : 0)
                 .overlay {
-                    if dockPosition != .cmdTab {
-                        WindowDismissalContainer(
-                            appName: appName,
-                            bestGuessMonitor: bestGuessMonitor,
-                            dockPosition: dockPosition,
-                            dockItemElement: dockItemElement,
-                            minimizeAllWindowsCallback: { _ in }
-                        )
-                        .allowsHitTesting(false)
-                    }
+                    WindowDismissalContainer(
+                        appName: appName,
+                        bestGuessMonitor: bestGuessMonitor,
+                        dockPosition: dockPosition,
+                        dockItemElement: dockItemElement,
+                        minimizeAllWindowsCallback: { _ in }
+                    )
+                    .allowsHitTesting(false)
                 }
             },
             highlightColor: highlightColor,
-            isWidget: true
+            isWidget: true,
+            backgroundAppearance: backgroundAppearance
         )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            activateApp()
+        }
     }
 
     private var pinnedContent: some View {
@@ -93,8 +103,7 @@ struct WidgetHoverContainer<Content: View>: View {
             appTitleOverlay
         }
         .background {
-            RoundedRectangle(cornerRadius: CardRadius.container, style: .continuous)
-                .fill(.thinMaterial)
+            BlurView(cornerRadius: CardRadius.container, appearance: backgroundAppearance)
         }
         .clipShape(RoundedRectangle(cornerRadius: CardRadius.container, style: .continuous))
         .overlay {
@@ -103,5 +112,15 @@ struct WidgetHoverContainer<Content: View>: View {
         }
         .padding(HoverContainerPadding.dockStyleOuter)
         .padding(.top, (appNameStyle == .popover && showAppTitleData) ? 30 : 0)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            activateApp()
+        }
+    }
+
+    private func activateApp() {
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).first else { return }
+        if app.isHidden { app.unhide() }
+        app.activate(options: [.activateIgnoringOtherApps])
     }
 }

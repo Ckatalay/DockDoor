@@ -16,6 +16,12 @@ struct WidgetSettingsView: View {
     @Default(.enableMediaWidget) var enableMediaWidget
     @Default(.mediaDetectionMode) var mediaDetectionMode
     @Default(.enableCalendarWidget) var enableCalendarWidget
+    @Default(.enableDockItemWidgets) var enableDockItemWidgets
+    @Default(.enableFolderWidget) var enableFolderWidget
+    @Default(.folderWidgetDefaultSortOrder) var folderWidgetDefaultSortOrder
+    @Default(.folderWidgetDefaultSortReversed) var folderWidgetDefaultSortReversed
+    @Default(.folderWidgetRememberSortPerFolder) var folderWidgetRememberSortPerFolder
+    @Default(.folderWidgetShowHiddenFiles) var folderWidgetShowHiddenFiles
     @Default(.useEmbeddedMediaControls) var useEmbeddedMediaControls
     @Default(.showBigControlsWhenNoValidWindows) var showBigControlsWhenNoValidWindows
     @Default(.enablePinning) var enablePinning
@@ -65,11 +71,13 @@ struct WidgetSettingsView: View {
                         Toggle(isOn: $showSpecialAppControls) {
                             Text("Enable widget controls on Dock hover")
                         }
+                        .settingsSearchTarget("widgets.enable")
 
                         if showSpecialAppControls {
                             Toggle(isOn: $enableMediaWidget) {
                                 Text("Media controls")
                             }
+                            .settingsSearchTarget("widgets.media")
                             .padding(.leading, 20)
                             Text("Show now playing controls when hovering the active media source's Dock icon. Works with any app.")
                                 .font(.caption)
@@ -83,6 +91,7 @@ struct WidgetSettingsView: View {
                                     }
                                 }
                                 .pickerStyle(.menu)
+                                .settingsSearchTarget("widgets.detectionMode")
                                 .padding(.leading, 40)
                                 Text(mediaDetectionMode.localizedDescription)
                                     .font(.caption)
@@ -93,6 +102,7 @@ struct WidgetSettingsView: View {
                             Toggle(isOn: $enableCalendarWidget) {
                                 Text("Calendar widget")
                             }
+                            .settingsSearchTarget("widgets.calendar")
                             .padding(.leading, 20)
                             Text("Show today's events when hovering the Calendar Dock icon.")
                                 .font(.caption)
@@ -102,26 +112,80 @@ struct WidgetSettingsView: View {
                     }
                 }
 
+                SettingsGroup(header: "Dock Item Widgets") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle(isOn: $enableDockItemWidgets) {
+                            Text("Enable Dock item widgets")
+                        }
+                        .settingsSearchTarget("widgets.dockItems")
+
+                        if enableDockItemWidgets {
+                            Toggle(isOn: $enableFolderWidget) {
+                                Text("Folder widget")
+                            }
+                            .settingsSearchTarget("widgets.folder")
+                            .padding(.leading, 20)
+
+                            Text("Show folder contents when hovering folders in the Dock.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.leading, 40)
+                        }
+                    }
+                }
+
+                if enableDockItemWidgets, enableFolderWidget {
+                    SettingsGroup(header: "Folder Widget") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Picker("Default sort:", selection: $folderWidgetDefaultSortOrder) {
+                                ForEach(FolderWidgetSortOrder.allCases, id: \.self) { order in
+                                    Text(order.localizedName).tag(order)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .settingsSearchTarget("widgets.folderSort")
+
+                            Toggle(isOn: $folderWidgetDefaultSortReversed) {
+                                Text("Sort descending by default")
+                            }
+                            .settingsSearchTarget("widgets.folderSortDirection")
+
+                            Toggle(isOn: $folderWidgetRememberSortPerFolder) {
+                                Text("Remember sorting per folder")
+                            }
+                            .settingsSearchTarget("widgets.folderRememberSort")
+
+                            Toggle(isOn: $folderWidgetShowHiddenFiles) {
+                                Text("Show hidden files")
+                            }
+                            .settingsSearchTarget("widgets.folderHiddenFiles")
+                        }
+                    }
+                }
+
                 if showSpecialAppControls {
                     SettingsGroup(header: "Display") {
                         VStack(alignment: .leading, spacing: 10) {
                             Toggle(isOn: $useEmbeddedMediaControls) {
-                                Text("Embed controls alongside window previews")
+                                Text("Show widget controls alongside window previews")
                             }
-                            Text("Show controls inline with window previews when both are available.")
+                            .settingsSearchTarget("widgets.embedded")
+                            Text("Keeps window previews visible when widget controls are shown.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .padding(.leading, 20)
 
                             Toggle(isOn: $showBigControlsWhenNoValidWindows) {
-                                Text("Use full-size controls when no windows are open")
+                                Text("Use full-size controls when all windows are minimized or hidden")
                             }
+                            .settingsSearchTarget("widgets.fullSize")
                             .disabled(!useEmbeddedMediaControls)
                             .opacity(useEmbeddedMediaControls ? 1.0 : 0.6)
 
                             Toggle(isOn: $enablePinning) {
                                 Text("Allow pinning controls to screen")
                             }
+                            .settingsSearchTarget("widgets.pinning")
                             .onChange(of: enablePinning) { isEnabled in
                                 if !isEnabled {
                                     SharedPreviewWindowCoordinator.activeInstance?.unpinAll()
@@ -146,6 +210,7 @@ struct WidgetSettingsView: View {
                                 }
                             }
                             .pickerStyle(.menu)
+                            .settingsSearchTarget("widgets.scrollBehavior")
 
                             Picker("Direction:", selection: $mediaWidgetScrollDirection) {
                                 ForEach(MediaWidgetScrollDirection.allCases, id: \.self) { direction in
@@ -153,6 +218,7 @@ struct WidgetSettingsView: View {
                                 }
                             }
                             .pickerStyle(.menu)
+                            .settingsSearchTarget("widgets.scrollDirection")
 
                             if mediaWidgetScrollDirection == .horizontal {
                                 HStack(spacing: 6) {

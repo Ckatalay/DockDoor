@@ -1,4 +1,5 @@
 import ApplicationServices
+import Carbon.HIToolbox.Events
 import Cocoa
 import Defaults
 
@@ -23,6 +24,12 @@ struct ApplicationReturnType {
     let dockItemElement: AXUIElement?
 }
 
+struct FolderDockItemInfo {
+    let url: URL
+    let title: String
+    let dockItemElement: AXUIElement
+}
+
 func handleSelectedDockItemChangedNotification(observer _: AXObserver, element _: AXUIElement, notificationName _: CFString, context: UnsafeMutableRawPointer?) {
     DispatchQueue.main.async {
         DockObserver.activeInstance?.processSelectedDockItemChanged()
@@ -30,6 +37,26 @@ func handleSelectedDockItemChangedNotification(observer _: AXObserver, element _
 }
 
 final class DockObserver {
+    private enum VerticalScrollAction {
+        case maximize
+        case center
+    }
+
+    private struct PendingRestoreState {
+        let windowId: CGWindowID
+        let processIdentifier: pid_t
+        let action: VerticalScrollAction
+        let originalFrame: CGRect
+        let expirationDate: Date
+    }
+
+    private struct CachedTitleBarInfo {
+        let window: WindowInfo
+        let windowFrame: CGRect
+        let titleBarRect: CGRect
+        let timestamp: Date
+    }
+
     weak static var activeInstance: DockObserver?
     let previewCoordinator: SharedPreviewWindowCoordinator
 
@@ -55,8 +82,39 @@ final class DockObserver {
     var lastHoveredAppHadWindows: Bool = false
 
     // Scroll gesture state
-    private var lastScrollActionTime: Date = .distantPast
-    private let scrollActionDebounceInterval: TimeInterval = 0.3
+    private var lastDockScrollActionTime: Date = .distantPast
+    private let dockScrollActionDebounceInterval: TimeInterval = 0.3
+    private var lastTitleBarScrollActionTime: Date = .distantPast
+    private var pendingTitleBarRestoreState: PendingRestoreState?
+
+    private let titleBarScrollActionDebounceInterval: TimeInterval = 0.35
+    private let minimumTitleBarScrollDelta: Double = 0.15
+    private let fallbackTitleBarHeight: CGFloat = 48
+    private let maximumTitleBarHeight: CGFloat = 72
+
+    private var cachedTitleBarInfo: CachedTitleBarInfo?
+    private var titleBarRefreshScheduled = false
+    private let titleBarCacheMaxAge: TimeInterval = 1.0
+
+    private var centeredWindowScale: CGFloat {
+        min(max(Defaults[.titleBarScrollCenteredWindowScale], 0.2), 1.0)
+    }
+
+    private var centeredWindowWidthScale: CGFloat {
+        min(max(Defaults[.titleBarScrollCenteredWindowWidthScale], 0.2), 1.0)
+    }
+
+    private var centeredWindowHeightScale: CGFloat {
+        min(max(Defaults[.titleBarScrollCenteredWindowHeightScale], 0.2), 1.0)
+    }
+
+    private var centeredWindowLockAspectRatio: Bool {
+        Defaults[.titleBarScrollCenteredWindowLockAspectRatio]
+    }
+
+    private var centeredWindowSizingMode: TitleBarCenteredWindowSizingMode {
+        Defaults[.titleBarScrollCenteredWindowSizingMode]
+    }
 
     @MainActor private static func isSpecialControlsApp(_ bundleId: String?) -> Bool {
         (bundleId == calendarAppIdentifier && Defaults[.enableCalendarWidget]) ||
@@ -175,9 +233,11 @@ final class DockObserver {
             return
         }
 
-        guard let children = try? dockAppElement.children(), let axList = children.first(where: { element in
-            try! element.role() == kAXListRole
-        }) else {
+        guard let children = try? dockAppElement.children(),
+              let axList = children.first(where: { element in
+                  (try? element.role()) == kAXListRole
+              })
+        else {
             return
         }
 
@@ -206,12 +266,20 @@ final class DockObserver {
 
     @MainActor func processSelectedDockItemChanged() {
         let currentMouseLocation = DockObserver.getMousePosition()
+
+        guard !previewCoordinator.windowSwitcherCoordinator.windowSwitcherActive else {
+            return
+        }
+
+        if handleHoveredFolderDockItemIfNeeded(mouseLocation: currentMouseLocation) {
+            return
+        }
+
         let appUnderMouseElement = DebugLogger.measureSlow("getDockItemAppStatusUnderMouse", thresholdMs: 100) {
             getDockItemAppStatusUnderMouse()
         }
 
-        guard !previewCoordinator.windowSwitcherCoordinator.windowSwitcherActive,
-              let dockItemElement = appUnderMouseElement.dockItemElement
+        guard let dockItemElement = appUnderMouseElement.dockItemElement
         else {
             return
         }
@@ -219,11 +287,12 @@ final class DockObserver {
         if case let .notRunning(bundleIdentifier) = appUnderMouseElement.status {
             let isCalendar = bundleIdentifier == calendarAppIdentifier && Defaults[.enableCalendarWidget]
             let mr = MediaRemoteService.shared
-            let isActiveMedia = bundleIdentifier == mr.activeBundleIdentifier
+            let mediaSourceMatches = mr.matchesMediaSource(bundleIdentifier: bundleIdentifier)
+            let isActiveMedia = mediaSourceMatches
                 && Defaults[.enableMediaWidget]
                 && (!mr.isUniversalSource || Defaults[.mediaDetectionMode] == .universal)
             if isCalendar || isActiveMedia, Defaults[.showSpecialAppControls], Defaults[.enableDockPreviews] {
-                let mouseScreen = NSScreen.screenContainingMouse(currentMouseLocation)
+                let mouseScreen = NSScreen.screenFromQuartzPoint(currentMouseLocation)
                 let convertedMouseLocation = DockObserver.nsPointFromCGPoint(currentMouseLocation, forScreen: mouseScreen)
                 let appName = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
                     .flatMap { Bundle(url: $0) }
@@ -304,11 +373,15 @@ final class DockObserver {
 
         guard Defaults[.enableDockPreviews] else { return }
 
-        let mouseScreen = NSScreen.screenContainingMouse(currentMouseLocation)
+        let mouseScreen = NSScreen.screenFromQuartzPoint(currentMouseLocation)
         let convertedMouseLocation = DockObserver.nsPointFromCGPoint(currentMouseLocation, forScreen: mouseScreen)
         let screenOrigin = mouseScreen.frame.origin
         let currentAppPID = currentApp.processIdentifier
         let currentAppBundleId = currentApp.bundleIdentifier
+
+        if cachedWindows.isEmpty, Defaults[.showWindowlessAppsInDockPreview] {
+            cachedWindows = [WindowInfo.windowlessEntry(for: currentApp)]
+        }
 
         let shouldShowCachedPreview = !cachedWindows.isEmpty ||
             (Self.isSpecialControlsApp(currentApp.bundleIdentifier) && Defaults[.showSpecialAppControls])
@@ -371,17 +444,47 @@ final class DockObserver {
                         }
                     }
 
-                    previewCoordinator.mergeWindowsIfNeeded(
+                    let didMerge = previewCoordinator.mergeWindowsIfNeeded(
                         currentAppPID,
                         windows: freshWindows,
                         dockPosition: dockPosition,
                         bestGuessMonitor: monitor
                     )
+                    DebugLogger.log("WindowRefresh", details: "dock hover final merge, PID: \(currentAppPID), windows: \(freshWindows.count), merged: \(didMerge)")
                 }
             } catch {
                 DebugLogger.log("DockObserver", details: "Failed to fetch windows for dock hover: \(error)")
             }
         }
+    }
+
+    @MainActor
+    private func handleHoveredFolderDockItemIfNeeded(mouseLocation: CGPoint) -> Bool {
+        guard let folderItem = getHoveredFolderDockItem() else { return false }
+
+        guard Defaults[.enableDockPreviews],
+              Defaults[.enableDockItemWidgets],
+              Defaults[.enableFolderWidget]
+        else {
+            return true
+        }
+
+        guard let accessibleURL = FolderWidgetAuthorization.accessibleURL(for: folderItem.url) else {
+            return true
+        }
+
+        let mouseScreen = NSScreen.screenFromQuartzPoint(mouseLocation)
+        let convertedMouseLocation = DockObserver.nsPointFromCGPoint(mouseLocation, forScreen: mouseScreen)
+
+        previewCoordinator.showFolderWidget(
+            folderURL: accessibleURL,
+            folderName: folderItem.title,
+            mouseLocation: convertedMouseLocation,
+            mouseScreen: mouseScreen,
+            dockItemElement: folderItem.dockItemElement
+        )
+
+        return true
     }
 
     /// Returns the currently selected (hovered) dock item, if any.
@@ -411,6 +514,10 @@ final class DockObserver {
         return hoveredItem
     }
 
+    func getHoveredDockItemElement() -> AXUIElement? {
+        getSelectedDockItem()
+    }
+
     func getHoveredApplicationDockItem() -> AXUIElement? {
         guard let item = getSelectedDockItem(),
               (try? item.subrole()) == "AXApplicationDockItem"
@@ -418,6 +525,19 @@ final class DockObserver {
             return nil
         }
         return item
+    }
+
+    func getHoveredFolderDockItem() -> FolderDockItemInfo? {
+        guard let item = getSelectedDockItem() else { return nil }
+        guard (try? item.subrole()) != "AXApplicationDockItem" else { return nil }
+        guard let url = try? item.attribute(kAXURLAttribute, NSURL.self)?.absoluteURL else { return nil }
+        guard url.pathExtension != "app" else { return nil }
+
+        let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
+        guard values?.isDirectory == true else { return nil }
+
+        let title = (try? item.title()) ?? FileManager.default.displayName(atPath: url.path)
+        return FolderDockItemInfo(url: url, title: title, dockItemElement: item)
     }
 
     /// Returns all dock item children from the dock list.
@@ -593,9 +713,12 @@ final class DockObserver {
     }
 
     private func setupEventTap() {
-        let eventMask: CGEventMask = (1 << CGEventType.leftMouseDown.rawValue) |
-            (1 << CGEventType.rightMouseDown.rawValue) |
-            (1 << CGEventType.scrollWheel.rawValue)
+        var eventMask: CGEventMask = (1 << CGEventType.leftMouseDown.rawValue) |
+            (1 << CGEventType.rightMouseDown.rawValue)
+
+        if Defaults[.enableDockScrollGesture] || Defaults[.enableTitleBarScrollGesture] {
+            eventMask |= (1 << CGEventType.scrollWheel.rawValue)
+        }
 
         guard let eventTap = CGEvent.tapCreate(
             tap: .cghidEventTap,
@@ -626,6 +749,10 @@ final class DockObserver {
         }
 
         if type == .scrollWheel {
+            if Defaults[.enableTitleBarScrollGesture], handleTitleBarScroll(event) {
+                return nil
+            }
+
             guard Defaults[.enableDockScrollGesture] else {
                 return Unmanaged.passUnretained(event)
             }
@@ -645,6 +772,13 @@ final class DockObserver {
         if case let .success(app) = appUnderMouse.status {
             if type == .rightMouseDown, event.flags.contains(.maskCommand), Defaults[.enableCmdRightClickQuit] {
                 handleCmdRightClickQuit(app: app, event: event)
+                return nil
+            }
+
+            if type == .leftMouseDown, event.flags.contains(.maskShift),
+               app.bundleIdentifier != Bundle.main.bundleIdentifier
+            {
+                handleShiftClickNewWindow(app: app)
                 return nil
             }
 
@@ -712,6 +846,7 @@ final class DockObserver {
         let restorationNeededAtClickTime = restorationNeededFromHover || hasMinimizedWindowsAtClickTime || app.isHidden
 
         lastHoveredPID = nil
+        previewCoordinator.cancelPendingShow()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self else { return }
@@ -732,7 +867,7 @@ final class DockObserver {
                 // This prevents native dock's restore from confusing our logic
                 let needsRestore = restorationNeededAtClickTime || currentlyHasMinimizedWindows
 
-                if needsRestore {
+                if needsRestore, Defaults[.restoreAllMinimizedWindowsOnDockClick] {
                     DebugLogger.log("DockClick", details: "\(appName): restoring (needsRestore=true, minimized=\(currentlyHasMinimizedWindows))")
                     restoreAppWindows(windows: windows, app: app, appName: appName)
                 } else if wasFrontmostOnHover, !windows.isEmpty {
@@ -743,6 +878,14 @@ final class DockObserver {
         }
 
         return false
+    }
+
+    private func handleShiftClickNewWindow(app: NSRunningApplication) {
+        previewCoordinator.cancelPendingShow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.previewCoordinator.hideWindow()
+        }
+        WindowUtil.activateAndOpenNewWindow(app: app)
     }
 
     private func hideAppWindows(windows: [WindowInfo], app: NSRunningApplication, appName: String) {
@@ -793,7 +936,7 @@ final class DockObserver {
 
             do {
                 let windows = try await WindowUtil.getActiveWindows(of: app)
-                let mouseScreen = NSScreen.screenContainingMouse(currentMouseLocation)
+                let mouseScreen = NSScreen.screenFromQuartzPoint(currentMouseLocation)
                 let convertedMouseLocation = DockObserver.nsPointFromCGPoint(currentMouseLocation, forScreen: mouseScreen)
 
                 previewCoordinator.showWindow(
@@ -811,7 +954,7 @@ final class DockObserver {
             } catch {
                 // If we can't get windows, still show the preview for special apps if enabled
                 if Self.isSpecialControlsApp(app.bundleIdentifier), Defaults[.showSpecialAppControls] {
-                    let mouseScreen = NSScreen.screenContainingMouse(currentMouseLocation)
+                    let mouseScreen = NSScreen.screenFromQuartzPoint(currentMouseLocation)
                     let convertedMouseLocation = DockObserver.nsPointFromCGPoint(currentMouseLocation, forScreen: mouseScreen)
 
                     previewCoordinator.showWindow(
@@ -851,6 +994,20 @@ final class DockObserver {
         let isNaturalScrolling = nsEvent?.isDirectionInvertedFromDevice ?? false
         let normalizedDeltaY = isNaturalScrolling ? -deltaY : deltaY
 
+        if Defaults[.dockIconScrollBehavior] == .bringAppWindowsToCurrentSpace {
+            let now = Date()
+            guard now.timeIntervalSince(lastDockScrollActionTime) >= dockScrollActionDebounceInterval else {
+                return true
+            }
+            lastDockScrollActionTime = now
+
+            WindowUtil.moveAppWindowsToCurrentManagedSpace(for: app)
+            Task { @MainActor in
+                previewCoordinator.hideWindow()
+            }
+            return true
+        }
+
         if app.bundleIdentifier == spotifyAppIdentifier || app.bundleIdentifier == appleMusicAppIdentifier {
             if Defaults[.dockIconMediaScrollBehavior] == .adjustVolume {
                 handleVolumeScroll(deltaY: normalizedDeltaY)
@@ -859,10 +1016,10 @@ final class DockObserver {
         }
 
         let now = Date()
-        guard now.timeIntervalSince(lastScrollActionTime) >= scrollActionDebounceInterval else {
+        guard now.timeIntervalSince(lastDockScrollActionTime) >= dockScrollActionDebounceInterval else {
             return true // Still consume the event during debounce
         }
-        lastScrollActionTime = now
+        lastDockScrollActionTime = now
 
         if normalizedDeltaY > 0 {
             activateApp(app)
@@ -895,5 +1052,189 @@ final class DockObserver {
             app.hide()
             previewCoordinator.hideWindow()
         }
+    }
+
+    private func scheduleTitleBarCacheRefresh() {
+        guard !titleBarRefreshScheduled else { return }
+        titleBarRefreshScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            titleBarRefreshScheduled = false
+            refreshTitleBarCache()
+        }
+    }
+
+    private func refreshTitleBarCache() {
+        guard let focusedWindow = WindowUtil.getFocusedWindowForFrontmostApp(),
+              let windowFrame = focusedWindow.currentWindowFrame()
+        else {
+            cachedTitleBarInfo = nil
+            return
+        }
+
+        let titleBarHeight = resolvedTitleBarHeight(for: focusedWindow, windowFrame: windowFrame)
+        let titleBarRect = CGRect(
+            x: windowFrame.minX,
+            y: windowFrame.maxY - titleBarHeight,
+            width: windowFrame.width,
+            height: titleBarHeight
+        )
+
+        cachedTitleBarInfo = CachedTitleBarInfo(
+            window: focusedWindow,
+            windowFrame: windowFrame,
+            titleBarRect: titleBarRect,
+            timestamp: Date()
+        )
+    }
+
+    private func handleTitleBarScroll(_ event: CGEvent) -> Bool {
+        let deltaX = event.getDoubleValueField(.scrollWheelEventDeltaAxis2)
+        let deltaY = event.getDoubleValueField(.scrollWheelEventDeltaAxis1)
+
+        guard abs(deltaX) > minimumTitleBarScrollDelta || abs(deltaY) > minimumTitleBarScrollDelta else {
+            return false
+        }
+
+        if event.getIntegerValueField(.scrollWheelEventMomentumPhase) != 0 {
+            return false
+        }
+
+        if let cached = cachedTitleBarInfo, Date().timeIntervalSince(cached.timestamp) > titleBarCacheMaxAge {
+            cachedTitleBarInfo = nil
+        }
+
+        if cachedTitleBarInfo == nil {
+            scheduleTitleBarCacheRefresh()
+            return false
+        }
+
+        guard let cached = cachedTitleBarInfo,
+              cached.titleBarRect.contains(NSEvent.mouseLocation)
+        else {
+            return false
+        }
+
+        let nsEvent = NSEvent(cgEvent: event)
+        let isNaturalScrolling = nsEvent?.isDirectionInvertedFromDevice ?? false
+        let normalizedDeltaX = isNaturalScrolling ? -deltaX : deltaX
+        let normalizedDeltaY = isNaturalScrolling ? -deltaY : deltaY
+
+        let now = Date()
+        guard now.timeIntervalSince(lastTitleBarScrollActionTime) >= titleBarScrollActionDebounceInterval else {
+            return true
+        }
+        lastTitleBarScrollActionTime = now
+
+        let window = cached.window
+
+        if abs(normalizedDeltaX) > abs(normalizedDeltaY) {
+            DispatchQueue.main.async { [weak self] in
+                if normalizedDeltaX > 0 {
+                    self?.switchToNextSpace()
+                } else {
+                    self?.switchToPreviousSpace()
+                }
+            }
+            return true
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            if normalizedDeltaY > 0 {
+                self?.handleTitleBarVerticalScroll(.maximize, for: window, now: now)
+            } else {
+                self?.handleTitleBarVerticalScroll(.center, for: window, now: now)
+            }
+        }
+
+        return true
+    }
+
+    private func handleTitleBarVerticalScroll(_ action: VerticalScrollAction, for window: WindowInfo, now: Date) {
+        if let pendingTitleBarRestoreState,
+           pendingTitleBarRestoreState.windowId == window.id,
+           pendingTitleBarRestoreState.processIdentifier == window.app.processIdentifier,
+           pendingTitleBarRestoreState.action == action,
+           pendingTitleBarRestoreState.expirationDate > now
+        {
+            window.setWindowFrame(pendingTitleBarRestoreState.originalFrame)
+            self.pendingTitleBarRestoreState = nil
+            return
+        }
+
+        guard let originalFrame = window.currentWindowFrame() else {
+            performTitleBarVerticalScrollAction(action, on: window)
+            pendingTitleBarRestoreState = nil
+            return
+        }
+
+        performTitleBarVerticalScrollAction(action, on: window)
+        pendingTitleBarRestoreState = PendingRestoreState(
+            windowId: window.id,
+            processIdentifier: window.app.processIdentifier,
+            action: action,
+            originalFrame: originalFrame,
+            expirationDate: now.addingTimeInterval(Double(Defaults[.titleBarScrollRestoreWindowInterval]))
+        )
+    }
+
+    private func performTitleBarVerticalScrollAction(_ action: VerticalScrollAction, on window: WindowInfo) {
+        switch action {
+        case .maximize:
+            window.zoom()
+        case .center:
+            switch centeredWindowSizingMode {
+            case .uniform:
+                window.centerWindow(scale: centeredWindowScale)
+            case .separate:
+                window.centerWindow(
+                    widthScale: centeredWindowWidthScale,
+                    heightScale: centeredWindowHeightScale,
+                    lockAspectRatio: centeredWindowLockAspectRatio
+                )
+            }
+        }
+    }
+
+    private func resolvedTitleBarHeight(for window: WindowInfo, windowFrame: CGRect) -> CGFloat {
+        let closeButton = window.closeButton ?? ((try? window.axElement.closeButton()) ?? nil)
+        guard let closeButton,
+              let closeButtonFrame = WindowInfo.currentWindowFrame(for: closeButton)
+        else {
+            return fallbackTitleBarHeight
+        }
+
+        let inferredHeight = windowFrame.maxY - closeButtonFrame.minY + 12
+        return min(max(inferredHeight, fallbackTitleBarHeight), maximumTitleBarHeight)
+    }
+
+    private func switchToPreviousSpace() {
+        postControlArrowKey(CGKeyCode(kVK_LeftArrow))
+    }
+
+    private func switchToNextSpace() {
+        postControlArrowKey(CGKeyCode(kVK_RightArrow))
+    }
+
+    private func postControlArrowKey(_ keyCode: CGKeyCode) {
+        guard let source = CGEventSource(stateID: .combinedSessionState) else {
+            return
+        }
+
+        let controlDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Control), keyDown: true)
+        controlDown?.flags = .maskControl
+
+        let arrowDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
+        arrowDown?.flags = .maskControl
+
+        let arrowUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
+        arrowUp?.flags = .maskControl
+
+        let controlUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Control), keyDown: false)
+
+        controlDown?.post(tap: .cghidEventTap)
+        arrowDown?.post(tap: .cghidEventTap)
+        arrowUp?.post(tap: .cghidEventTap)
+        controlUp?.post(tap: .cghidEventTap)
     }
 }

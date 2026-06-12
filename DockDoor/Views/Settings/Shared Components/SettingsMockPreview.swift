@@ -46,9 +46,12 @@ struct SettingsMockPreview: View {
     @Default(.switcherTrafficLightButtonsVisibility) private var switcherTrafficLightVisibility
     @Default(.switcherEnabledTrafficLightButtons) private var switcherEnabledTrafficLightButtons
     @Default(.switcherUseMonochromeTrafficLights) private var switcherUseMonochrome
+    @Default(.switcherShowAppHeader) private var switcherShowAppHeader
     @Default(.switcherShowWindowTitle) private var switcherShowWindowTitle
     @Default(.switcherWindowTitleVisibility) private var switcherWindowTitleVisibility
+    @Default(.switcherAppIconSize) private var switcherAppIconSize
     @Default(.windowSwitcherControlPosition) private var switcherControlPosition
+    @Default(.switcherUseEmbeddedDockPreviewElements) private var switcherUseEmbedded
     @Default(.switcherDisableDockStyleTrafficLights) private var switcherDisableStyleTrafficLights
     @Default(.windowSwitcherLivePreviewQuality) private var switcherLivePreviewQuality
     @Default(.windowSwitcherLivePreviewFrameRate) private var switcherLivePreviewFrameRate
@@ -81,6 +84,15 @@ struct SettingsMockPreview: View {
     @Default(.globalPaddingMultiplier) private var globalPaddingMultiplier
     @Default(.windowTitleFontSize) private var windowTitleFontSize
     @Default(.trafficLightButtonScale) private var trafficLightButtonScale
+
+    // MARK: - Compact mode settings
+
+    @Default(.previewWidth) private var previewWidth
+    @Default(.compactModeTitleFormat) private var compactModeTitleFormat
+    @Default(.compactModeItemSize) private var compactModeItemSize
+    @Default(.compactModeHideTrafficLights) private var compactModeHideTrafficLights
+    @Default(.showWindowlessAppQuitButton) private var showWindowlessAppQuitButton
+    @Default(.titleOverflowStyle) private var titleOverflowStyle
 
     // MARK: - Header settings (used by container)
 
@@ -169,7 +181,9 @@ struct SettingsMockPreview: View {
             dockDisableStyleTitles
         }
 
-        let useEmbedded: Bool = if isCmdTab {
+        let useEmbedded: Bool = if isWindowSwitcher {
+            switcherUseEmbedded
+        } else if isCmdTab {
             cmdTabUseEmbedded
         } else {
             dockUseEmbedded
@@ -182,6 +196,7 @@ struct SettingsMockPreview: View {
             trafficLightVisibility: trafficLightVisibility,
             enabledTrafficLightButtons: enabledButtons,
             useMonochromeTrafficLights: monochrome,
+            showAppHeader: isWindowSwitcher ? switcherShowAppHeader : true,
             showWindowTitle: showTitle,
             windowTitleVisibility: titleVisibility,
             controlPosition: controlPos,
@@ -201,9 +216,16 @@ struct SettingsMockPreview: View {
             showAnimations: showAnimations,
             globalPaddingMultiplier: globalPaddingMultiplier,
             windowTitleFontSize: windowTitleFontSize,
+            switcherAppIconSize: isWindowSwitcher ? switcherAppIconSize : 0,
             trafficLightButtonScale: trafficLightButtonScale,
             livePreviewQuality: quality,
-            livePreviewFrameRate: frameRate
+            livePreviewFrameRate: frameRate,
+            previewWidth: previewWidth,
+            compactModeTitleFormat: compactModeTitleFormat,
+            compactModeItemSize: compactModeItemSize,
+            compactModeHideTrafficLights: compactModeHideTrafficLights,
+            showWindowlessAppQuitButton: showWindowlessAppQuitButton,
+            titleOverflowStyle: titleOverflowStyle
         )
     }
 

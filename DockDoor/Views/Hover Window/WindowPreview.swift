@@ -2,10 +2,11 @@ import Defaults
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct PreviewAppearanceSettings {
+struct PreviewAppearanceSettings: Equatable {
     let trafficLightVisibility: TrafficLightButtonsVisibility
     let enabledTrafficLightButtons: Set<WindowAction>
     let useMonochromeTrafficLights: Bool
+    let showAppHeader: Bool
     let showWindowTitle: Bool
     let windowTitleVisibility: WindowTitleVisibility
     let controlPosition: WindowSwitcherControlPosition
@@ -25,9 +26,16 @@ struct PreviewAppearanceSettings {
     let showAnimations: Bool
     let globalPaddingMultiplier: CGFloat
     let windowTitleFontSize: WindowTitleFontSize
+    let switcherAppIconSize: CGFloat
     let trafficLightButtonScale: CGFloat
     let livePreviewQuality: LivePreviewQuality
     let livePreviewFrameRate: LivePreviewFrameRate
+    let previewWidth: CGFloat
+    let compactModeTitleFormat: CompactModeTitleFormat
+    let compactModeItemSize: CompactModeItemSize
+    let compactModeHideTrafficLights: Bool
+    let showWindowlessAppQuitButton: Bool
+    let titleOverflowStyle: TitleOverflowStyle
 
     var isDiagonalPosition: Bool {
         switch controlPosition {
@@ -39,90 +47,50 @@ struct PreviewAppearanceSettings {
         }
     }
 
+    static let observedKeys: [Defaults._AnyKey] = [
+        .trafficLightButtonsVisibility, .switcherTrafficLightButtonsVisibility, .cmdTabTrafficLightButtonsVisibility,
+        .enabledTrafficLightButtons, .switcherEnabledTrafficLightButtons, .cmdTabEnabledTrafficLightButtons,
+        .useMonochromeTrafficLights, .switcherUseMonochromeTrafficLights, .cmdTabUseMonochromeTrafficLights,
+        .switcherShowAppHeader,
+        .showWindowTitle, .switcherShowWindowTitle, .cmdTabShowWindowTitle,
+        .windowTitleVisibility, .switcherWindowTitleVisibility, .cmdTabWindowTitleVisibility,
+        .dockPreviewControlPosition, .windowSwitcherControlPosition, .cmdTabControlPosition,
+        .useEmbeddedDockPreviewElements, .switcherUseEmbeddedDockPreviewElements, .cmdTabUseEmbeddedDockPreviewElements,
+        .disableDockStyleTrafficLights, .switcherDisableDockStyleTrafficLights, .cmdTabDisableDockStyleTrafficLights,
+        .disableDockStyleTitles, .cmdTabDisableDockStyleTitles,
+        .dockLivePreviewQuality, .windowSwitcherLivePreviewQuality,
+        .dockLivePreviewFrameRate, .windowSwitcherLivePreviewFrameRate,
+        .showMinimizedHiddenLabels, .selectionOpacity, .unselectedContentOpacity, .hoverHighlightColor,
+        .allowDynamicImageSizing, .hidePreviewCardBackground, .tapEquivalentInterval, .previewHoverAction,
+        .showActiveWindowBorder, .activeAppIndicatorColor, .showAnimations, .globalPaddingMultiplier,
+        .windowTitleFontSize, .switcherAppIconSize, .trafficLightButtonScale,
+        .previewWidth, .compactModeTitleFormat, .compactModeItemSize, .compactModeHideTrafficLights,
+        .showWindowlessAppQuitButton, .titleOverflowStyle,
+    ]
+
     static func resolve(windowSwitcherActive: Bool, dockPosition: DockPosition) -> PreviewAppearanceSettings {
         let isCmdTab = dockPosition == .cmdTab
-
-        let trafficLightVisibility: TrafficLightButtonsVisibility = if windowSwitcherActive {
-            Defaults[.switcherTrafficLightButtonsVisibility]
-        } else if isCmdTab {
-            Defaults[.cmdTabTrafficLightButtonsVisibility]
-        } else {
-            Defaults[.trafficLightButtonsVisibility]
+        func pick<T: Defaults.Serializable>(
+            _ base: Defaults.Key<T>,
+            switcher: Defaults.Key<T>? = nil,
+            cmdTab: Defaults.Key<T>? = nil
+        ) -> T {
+            if windowSwitcherActive, let switcher { return Defaults[switcher] }
+            if isCmdTab, let cmdTab { return Defaults[cmdTab] }
+            return Defaults[base]
         }
-
-        let enabledButtons: Set<WindowAction> = if windowSwitcherActive {
-            Defaults[.switcherEnabledTrafficLightButtons]
-        } else if isCmdTab {
-            Defaults[.cmdTabEnabledTrafficLightButtons]
-        } else {
-            Defaults[.enabledTrafficLightButtons]
-        }
-
-        let monochrome: Bool = if windowSwitcherActive {
-            Defaults[.switcherUseMonochromeTrafficLights]
-        } else if isCmdTab {
-            Defaults[.cmdTabUseMonochromeTrafficLights]
-        } else {
-            Defaults[.useMonochromeTrafficLights]
-        }
-
-        let showTitle: Bool = if windowSwitcherActive {
-            Defaults[.switcherShowWindowTitle]
-        } else if isCmdTab {
-            Defaults[.cmdTabShowWindowTitle]
-        } else {
-            Defaults[.showWindowTitle]
-        }
-
-        let titleVisibility: WindowTitleVisibility = if windowSwitcherActive {
-            Defaults[.switcherWindowTitleVisibility]
-        } else if isCmdTab {
-            Defaults[.cmdTabWindowTitleVisibility]
-        } else {
-            Defaults[.windowTitleVisibility]
-        }
-
-        let controlPos: WindowSwitcherControlPosition = if windowSwitcherActive {
-            Defaults[.windowSwitcherControlPosition]
-        } else if isCmdTab {
-            Defaults[.cmdTabControlPosition]
-        } else {
-            Defaults[.dockPreviewControlPosition]
-        }
-
-        let disableStyleTrafficLights: Bool = if windowSwitcherActive {
-            Defaults[.switcherDisableDockStyleTrafficLights]
-        } else if isCmdTab {
-            Defaults[.cmdTabDisableDockStyleTrafficLights]
-        } else {
-            Defaults[.disableDockStyleTrafficLights]
-        }
-
-        let disableStyleTitles: Bool = if isCmdTab {
-            Defaults[.cmdTabDisableDockStyleTitles]
-        } else {
-            Defaults[.disableDockStyleTitles]
-        }
-
-        let useEmbedded: Bool = if isCmdTab {
-            Defaults[.cmdTabUseEmbeddedDockPreviewElements]
-        } else {
-            Defaults[.useEmbeddedDockPreviewElements]
-        }
-
-        let quality = windowSwitcherActive ? Defaults[.windowSwitcherLivePreviewQuality] : Defaults[.dockLivePreviewQuality]
-        let frameRate = windowSwitcherActive ? Defaults[.windowSwitcherLivePreviewFrameRate] : Defaults[.dockLivePreviewFrameRate]
 
         return PreviewAppearanceSettings(
-            trafficLightVisibility: trafficLightVisibility,
-            enabledTrafficLightButtons: enabledButtons,
-            useMonochromeTrafficLights: monochrome,
-            showWindowTitle: showTitle,
-            windowTitleVisibility: titleVisibility,
-            controlPosition: controlPos,
-            useEmbeddedElements: useEmbedded,
-            disableDockStyleTrafficLights: disableStyleTrafficLights,
-            disableDockStyleTitles: disableStyleTitles,
+            trafficLightVisibility: pick(.trafficLightButtonsVisibility, switcher: .switcherTrafficLightButtonsVisibility, cmdTab: .cmdTabTrafficLightButtonsVisibility),
+            enabledTrafficLightButtons: pick(.enabledTrafficLightButtons, switcher: .switcherEnabledTrafficLightButtons, cmdTab: .cmdTabEnabledTrafficLightButtons),
+            useMonochromeTrafficLights: pick(.useMonochromeTrafficLights, switcher: .switcherUseMonochromeTrafficLights, cmdTab: .cmdTabUseMonochromeTrafficLights),
+            showAppHeader: windowSwitcherActive ? Defaults[.switcherShowAppHeader] : true,
+            showWindowTitle: pick(.showWindowTitle, switcher: .switcherShowWindowTitle, cmdTab: .cmdTabShowWindowTitle),
+            windowTitleVisibility: pick(.windowTitleVisibility, switcher: .switcherWindowTitleVisibility, cmdTab: .cmdTabWindowTitleVisibility),
+            controlPosition: pick(.dockPreviewControlPosition, switcher: .windowSwitcherControlPosition, cmdTab: .cmdTabControlPosition),
+            useEmbeddedElements: pick(.useEmbeddedDockPreviewElements, switcher: .switcherUseEmbeddedDockPreviewElements, cmdTab: .cmdTabUseEmbeddedDockPreviewElements),
+            disableDockStyleTrafficLights: pick(.disableDockStyleTrafficLights, switcher: .switcherDisableDockStyleTrafficLights, cmdTab: .cmdTabDisableDockStyleTrafficLights),
+            disableDockStyleTitles: pick(.disableDockStyleTitles, cmdTab: .cmdTabDisableDockStyleTitles),
             showMinimizedHiddenLabels: Defaults[.showMinimizedHiddenLabels],
             selectionOpacity: Defaults[.selectionOpacity],
             unselectedContentOpacity: Defaults[.unselectedContentOpacity],
@@ -136,14 +104,21 @@ struct PreviewAppearanceSettings {
             showAnimations: Defaults[.showAnimations],
             globalPaddingMultiplier: Defaults[.globalPaddingMultiplier],
             windowTitleFontSize: Defaults[.windowTitleFontSize],
+            switcherAppIconSize: Defaults[.switcherAppIconSize],
             trafficLightButtonScale: Defaults[.trafficLightButtonScale],
-            livePreviewQuality: quality,
-            livePreviewFrameRate: frameRate
+            livePreviewQuality: pick(.dockLivePreviewQuality, switcher: .windowSwitcherLivePreviewQuality),
+            livePreviewFrameRate: pick(.dockLivePreviewFrameRate, switcher: .windowSwitcherLivePreviewFrameRate),
+            previewWidth: Defaults[.previewWidth],
+            compactModeTitleFormat: Defaults[.compactModeTitleFormat],
+            compactModeItemSize: Defaults[.compactModeItemSize],
+            compactModeHideTrafficLights: Defaults[.compactModeHideTrafficLights],
+            showWindowlessAppQuitButton: Defaults[.showWindowlessAppQuitButton],
+            titleOverflowStyle: Defaults[.titleOverflowStyle]
         )
     }
 }
 
-struct WindowPreview: View {
+struct WindowPreview: View, Equatable {
     let windowInfo: WindowInfo
     let onTap: (() -> Void)?
     let index: Int
@@ -157,9 +132,12 @@ struct WindowPreview: View {
     let showAppIconOnly: Bool
     let mockPreviewActive: Bool
     let onHoverIndexChange: ((Int?, CGPoint?) -> Void)?
+    let onDragHoverIndexChange: ((Int?) -> Void)?
     let useLivePreview: Bool
     var skeletonMode: Bool = false
     var appearance: PreviewAppearanceSettings
+    let backgroundAppearance: BackgroundAppearance
+    let focusedWindowID: CGWindowID?
 
     @State private var isHoveringOverDockPeekPreview = false
     @State private var isHoveringOverWindowSwitcherPreview = false
@@ -169,13 +147,74 @@ struct WindowPreview: View {
     @State private var dragTimer: Timer?
     @State private var highlightOpacity = 0.0
 
+    static func == (l: Self, r: Self) -> Bool {
+        l.index == r.index && l.isSelected == r.isSelected && l.useLivePreview == r.useLivePreview
+            && l.skeletonMode == r.skeletonMode && l.dimensions == r.dimensions
+            && l.uniformCardRadius == r.uniformCardRadius && l.showAppIconOnly == r.showAppIconOnly
+            && l.windowSwitcherActive == r.windowSwitcherActive
+            && l.appearance == r.appearance && l.windowInfo.viewSnapshot == r.windowInfo.viewSnapshot
+            && l.backgroundAppearance == r.backgroundAppearance
+            && l.focusedWindowID == r.focusedWindowID
+    }
+
     private var isActiveWindow: Bool {
         guard appearance.showActiveWindowBorder else { return false }
         guard windowInfo.app.isActive else { return false }
-        guard let focusedWindow = try? windowInfo.appAxElement.focusedWindow(),
-              let focusedWindowID = try? focusedWindow.cgWindowId()
-        else { return false }
         return windowInfo.id == focusedWindowID
+    }
+
+    private var dynamicSwitcherCardWidth: CGFloat? {
+        guard windowSwitcherActive, appearance.allowDynamicImageSizing, dimensions.size.width > 0 else {
+            return nil
+        }
+        let chromeWidth = min(
+            dimensions.maxDimensions.width,
+            WindowPreviewHoverContainer.dynamicSwitcherMinimumCardWidth
+        )
+        return max(dimensions.size.width, chromeWidth)
+    }
+
+    private var switcherToolbarHorizontalPadding: CGFloat {
+        CardRadius.switcherToolbarHorizontalPadding(
+            uniformCardRadius: windowSwitcherActive && uniformCardRadius
+        )
+    }
+
+    private var hasWindowSwitcherControlContent: Bool {
+        let canShowWindowControls = appearance.showMinimizedHiddenLabels ? (!windowInfo.isMinimized && !windowInfo.isHidden) : true
+
+        if windowInfo.closeButton != nil,
+           appearance.trafficLightVisibility != .never,
+           canShowWindowControls
+        {
+            return true
+        }
+
+        return (windowInfo.isMinimized || windowInfo.isHidden) &&
+            appearance.showMinimizedHiddenLabels &&
+            appearance.trafficLightVisibility != .never
+    }
+
+    private func switcherAppIconSize(hasSecondaryLabel: Bool) -> CGFloat {
+        if appearance.switcherAppIconSize > 0 {
+            return min(max(appearance.switcherAppIconSize, 16), 64)
+        }
+
+        return hasSecondaryLabel ? 35 : 20
+    }
+
+    @ViewBuilder
+    private func titleLabel(_ text: String) -> some View {
+        switch appearance.titleOverflowStyle {
+        case .marquee:
+            MarqueeText(text: text, startDelay: 1)
+        case .truncateTail:
+            MarqueeText(text: text, truncationMode: .tail, enableScrolling: false)
+        case .truncateMiddle:
+            MarqueeText(text: text, truncationMode: .middle, enableScrolling: false)
+        case .truncateHead:
+            MarqueeText(text: text, truncationMode: .head, enableScrolling: false)
+        }
     }
 
     @ViewBuilder
@@ -208,7 +247,7 @@ struct WindowPreview: View {
         .animation(appearance.showAnimations ? .easeInOut(duration: 0.15) : nil, value: inactive)
         .clipShape(RoundedRectangle(cornerRadius: CardRadius.image, style: .continuous))
         .dynamicWindowFrame(
-            allowDynamicSizing: appearance.allowDynamicImageSizing && !windowSwitcherActive,
+            allowDynamicSizing: appearance.allowDynamicImageSizing,
             dimensions: dimensions,
             dockPosition: dockPosition,
             windowSwitcherActive: windowSwitcherActive
@@ -218,8 +257,45 @@ struct WindowPreview: View {
 
     @ViewBuilder
     private func embeddedControlsOverlay(_ selected: Bool) -> some View {
-        if !windowSwitcherActive {
+        if windowSwitcherActive {
+            embeddedWindowSwitcherControls(selected)
+        } else {
             embeddedDockPreviewControls(selected)
+        }
+    }
+
+    @ViewBuilder
+    private func embeddedWindowSwitcherControls(_ selected: Bool) -> some View {
+        VStack(spacing: 0) {
+            if appearance.controlPosition.showsOnTop {
+                let config = appearance.controlPosition.topConfiguration
+                let shouldShowTopToolbar = (config.showControls && hasWindowSwitcherControlContent) || (config.showTitle && appearance.showAppHeader)
+                if shouldShowTopToolbar {
+                    windowSwitcherContent(
+                        selected,
+                        isLeadingControls: config.isLeadingControls,
+                        showTitleContent: config.showTitle,
+                        showControlsContent: config.showControls
+                    )
+                    .padding(8)
+                }
+            }
+
+            Spacer()
+
+            if appearance.controlPosition.showsOnBottom {
+                let config = appearance.controlPosition.bottomConfiguration
+                let shouldShowBottomToolbar = (config.showControls && hasWindowSwitcherControlContent) || (config.showTitle && appearance.showAppHeader)
+                if shouldShowBottomToolbar {
+                    windowSwitcherContent(
+                        selected,
+                        isLeadingControls: config.isLeadingControls,
+                        showTitleContent: config.showTitle,
+                        showControlsContent: config.showControls
+                    )
+                    .padding(8)
+                }
+            }
         }
     }
 
@@ -241,11 +317,11 @@ struct WindowPreview: View {
 
         let titleContent = Group {
             if hasTitle, let title = titleToShow {
-                MarqueeText(text: title, startDelay: 1)
+                titleLabel(title)
                     .font(appearance.windowTitleFontSize.font)
                     .padding(4)
                     .if(!appearance.disableDockStyleTitles) { view in
-                        view.materialPill()
+                        view.materialPill(backgroundAppearance: backgroundAppearance)
                     }
             }
         }
@@ -260,7 +336,8 @@ struct WindowPreview: View {
                     mockPreviewActive: mockPreviewActive,
                     enabledButtons: appearance.enabledTrafficLightButtons,
                     useMonochrome: appearance.useMonochromeTrafficLights,
-                    buttonScale: appearance.trafficLightButtonScale
+                    buttonScale: appearance.trafficLightButtonScale,
+                    backgroundAppearance: backgroundAppearance
                 )
             } else if windowInfo.isMinimized || windowInfo.isHidden,
                       appearance.showMinimizedHiddenLabels,
@@ -271,8 +348,10 @@ struct WindowPreview: View {
                     .italic()
                     .foregroundStyle(.secondary)
                     .padding(4)
-                    .materialPill()
-                    .frame(height: 34)
+                    .if(!appearance.disableDockStyleTitles) { view in
+                        view.materialPill(backgroundAppearance: backgroundAppearance)
+                            .frame(height: 34)
+                    }
             }
         }
 
@@ -475,8 +554,15 @@ struct WindowPreview: View {
     }
 
     private func windowSwitcherContent(_ selected: Bool, isLeadingControls: Bool, showTitleContent: Bool = true, showControlsContent: Bool = true) -> some View {
+        let shouldShowAppHeader = appearance.showAppHeader && showTitleContent
+        let shouldShowControls = showControlsContent && hasWindowSwitcherControlContent
         let shouldShowWindowTitle = appearance.showWindowTitle &&
             (appearance.windowTitleVisibility == .alwaysVisible || selected || isHoveringOverWindowSwitcherPreview)
+        let windowTitle = windowInfo.windowName
+        let hasWindowTitleLabel = shouldShowWindowTitle &&
+            windowTitle?.isEmpty == false &&
+            windowTitle != windowInfo.app.localizedName
+        let appIconSize = switcherAppIconSize(hasSecondaryLabel: hasWindowTitleLabel)
 
         let titleAndSubtitleContent = VStack(alignment: .leading, spacing: 0) {
             if !showAppIconOnly {
@@ -485,24 +571,20 @@ struct WindowPreview: View {
                     .lineLimit(1)
             }
 
-            if let windowTitle = windowInfo.windowName,
-               !windowTitle.isEmpty,
-               windowTitle != windowInfo.app.localizedName,
-               shouldShowWindowTitle
-            {
-                MarqueeText(text: windowTitle, startDelay: 1)
+            if let windowTitle, hasWindowTitleLabel {
+                titleLabel(windowTitle)
                     .font(appearance.windowTitleFontSize.font)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
         }
+        .padding(.trailing, 8)
 
         let appIconContent = Group {
             if let appIcon = windowInfo.app.icon {
                 Image(nsImage: appIcon)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 35, height: 35)
+                    .frame(width: appIconSize, height: appIconSize)
             }
         }
 
@@ -515,7 +597,8 @@ struct WindowPreview: View {
                     pillStyling: !appearance.disableDockStyleTrafficLights,
                     mockPreviewActive: mockPreviewActive,
                     enabledButtons: appearance.enabledTrafficLightButtons,
-                    useMonochrome: appearance.useMonochromeTrafficLights
+                    useMonochrome: appearance.useMonochromeTrafficLights,
+                    backgroundAppearance: backgroundAppearance
                 )
             } else if windowInfo.isMinimized || windowInfo.isHidden,
                       appearance.showMinimizedHiddenLabels,
@@ -526,34 +609,40 @@ struct WindowPreview: View {
                     .italic()
                     .foregroundStyle(.secondary)
                     .padding(4)
-                    .materialPill()
-                    .frame(height: 34)
+                    .if(!appearance.disableDockStyleTitles) { view in
+                        view.materialPill(backgroundAppearance: backgroundAppearance)
+                            .frame(height: 34)
+                    }
             }
         }
 
-        return HStack(spacing: 4) {
-            if appearance.controlPosition.isCentered {
-                Spacer(minLength: 0)
-                if showTitleContent {
-                    appIconContent
-                    titleAndSubtitleContent
+        return Group {
+            if shouldShowAppHeader || shouldShowControls {
+                HStack(spacing: 4) {
+                    if appearance.controlPosition.isCentered {
+                        Spacer(minLength: 0)
+                        if shouldShowAppHeader {
+                            appIconContent
+                            titleAndSubtitleContent
+                        }
+                        if shouldShowControls { controlsContent }
+                        Spacer(minLength: 0)
+                    } else if isLeadingControls {
+                        if shouldShowControls { controlsContent }
+                        Spacer(minLength: 8)
+                        if shouldShowAppHeader {
+                            appIconContent
+                            titleAndSubtitleContent
+                        }
+                    } else {
+                        if shouldShowAppHeader {
+                            appIconContent
+                            titleAndSubtitleContent
+                        }
+                        Spacer(minLength: 8)
+                        if shouldShowControls { controlsContent }
+                    }
                 }
-                if showControlsContent { controlsContent }
-                Spacer(minLength: 0)
-            } else if isLeadingControls {
-                if showControlsContent { controlsContent }
-                Spacer(minLength: 8)
-                if showTitleContent {
-                    appIconContent
-                    titleAndSubtitleContent
-                }
-            } else {
-                if showTitleContent {
-                    appIconContent
-                    titleAndSubtitleContent
-                }
-                Spacer(minLength: 8)
-                if showControlsContent { controlsContent }
             }
         }
     }
@@ -576,11 +665,11 @@ struct WindowPreview: View {
 
         let titleContent = Group {
             if hasTitle, let title = titleToShow {
-                MarqueeText(text: title, startDelay: 1)
+                titleLabel(title)
                     .font(appearance.windowTitleFontSize.font)
                     .padding(4)
                     .if(!appearance.disableDockStyleTitles) { view in
-                        view.materialPill()
+                        view.materialPill(backgroundAppearance: backgroundAppearance)
                     }
             }
         }
@@ -595,7 +684,8 @@ struct WindowPreview: View {
                     mockPreviewActive: mockPreviewActive,
                     enabledButtons: appearance.enabledTrafficLightButtons,
                     useMonochrome: appearance.useMonochromeTrafficLights,
-                    buttonScale: appearance.trafficLightButtonScale
+                    buttonScale: appearance.trafficLightButtonScale,
+                    backgroundAppearance: backgroundAppearance
                 )
             } else if windowInfo.isMinimized || windowInfo.isHidden,
                       appearance.showMinimizedHiddenLabels,
@@ -606,8 +696,10 @@ struct WindowPreview: View {
                     .italic()
                     .foregroundStyle(.secondary)
                     .padding(4)
-                    .materialPill()
-                    .frame(height: 34)
+                    .if(!appearance.disableDockStyleTitles) { view in
+                        view.materialPill(backgroundAppearance: backgroundAppearance)
+                            .frame(height: 34)
+                    }
             }
         }
 
@@ -644,21 +736,26 @@ struct WindowPreview: View {
     @ViewBuilder
     private var previewCoreContent: some View {
         let finalIsSelected = isSelected || isHoveringOverDockPeekPreview
+        let switcherCardWidth = dynamicSwitcherCardWidth
 
         ZStack(alignment: .topLeading) {
             VStack(alignment: .leading, spacing: 0) {
-                if !appearance.useEmbeddedElements || windowSwitcherActive,
+                if !appearance.useEmbeddedElements,
                    appearance.controlPosition.showsOnTop
                 {
                     let config = appearance.controlPosition.topConfiguration
-                    Group {
-                        if windowSwitcherActive {
-                            windowSwitcherContent(finalIsSelected, isLeadingControls: config.isLeadingControls, showTitleContent: config.showTitle, showControlsContent: config.showControls)
-                        } else {
-                            dockPreviewContent(finalIsSelected, isLeadingControls: config.isLeadingControls, showTitleContent: config.showTitle, showControlsContent: config.showControls)
+                    let shouldShowTopToolbar = !windowSwitcherActive || (config.showControls && hasWindowSwitcherControlContent) || (config.showTitle && appearance.showAppHeader)
+                    if shouldShowTopToolbar {
+                        Group {
+                            if windowSwitcherActive {
+                                windowSwitcherContent(finalIsSelected, isLeadingControls: config.isLeadingControls, showTitleContent: config.showTitle, showControlsContent: config.showControls)
+                            } else {
+                                dockPreviewContent(finalIsSelected, isLeadingControls: config.isLeadingControls, showTitleContent: config.showTitle, showControlsContent: config.showControls)
+                            }
                         }
+                        .padding(.horizontal, switcherToolbarHorizontalPadding)
+                        .padding(.bottom, 4)
                     }
-                    .padding(.bottom, 4)
                 }
 
                 windowContent(
@@ -666,27 +763,39 @@ struct WindowPreview: View {
                     isHidden: windowInfo.isHidden,
                     isSelected: finalIsSelected
                 )
+                .if(switcherCardWidth != nil) { view in
+                    view.frame(width: switcherCardWidth, alignment: .center)
+                }
 
-                if !appearance.useEmbeddedElements || windowSwitcherActive,
+                if !appearance.useEmbeddedElements,
                    appearance.controlPosition.showsOnBottom
                 {
                     let config = appearance.controlPosition.bottomConfiguration
-                    Group {
-                        if windowSwitcherActive {
-                            windowSwitcherContent(finalIsSelected, isLeadingControls: config.isLeadingControls, showTitleContent: config.showTitle, showControlsContent: config.showControls)
-                        } else {
-                            dockPreviewContent(finalIsSelected, isLeadingControls: config.isLeadingControls, showTitleContent: config.showTitle, showControlsContent: config.showControls)
+                    let shouldShowBottomToolbar = !windowSwitcherActive || (config.showControls && hasWindowSwitcherControlContent) || (config.showTitle && appearance.showAppHeader)
+                    if shouldShowBottomToolbar {
+                        Group {
+                            if windowSwitcherActive {
+                                windowSwitcherContent(finalIsSelected, isLeadingControls: config.isLeadingControls, showTitleContent: config.showTitle, showControlsContent: config.showControls)
+                            } else {
+                                dockPreviewContent(finalIsSelected, isLeadingControls: config.isLeadingControls, showTitleContent: config.showTitle, showControlsContent: config.showControls)
+                            }
                         }
+                        .padding(.horizontal, switcherToolbarHorizontalPadding)
+                        .padding(.top, 4)
                     }
-                    .padding(.top, 4)
                 }
             }
-            .frame(maxWidth: dimensions.maxDimensions.width > 0 ? dimensions.maxDimensions.width : nil)
+            .if(switcherCardWidth != nil) { view in
+                view.frame(width: switcherCardWidth, alignment: .center)
+            }
+            .if(switcherCardWidth == nil) { view in
+                view.frame(maxWidth: dimensions.maxDimensions.width > 0 ? dimensions.maxDimensions.width : nil)
+            }
             .background {
                 let cornerRadius = uniformCardRadius ? CardRadius.base + (CardRadius.innerPadding * appearance.globalPaddingMultiplier) : 8.0
 
                 if !appearance.hidePreviewCardBackground {
-                    BlurView(variant: 18)
+                    BlurView(cornerRadius: cornerRadius, appearance: backgroundAppearance)
                         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
                         .borderedBackground(.primary.opacity(0.1), lineWidth: 1.75, cornerRadius: cornerRadius)
                         .padding(-CardRadius.innerPadding)
@@ -717,7 +826,7 @@ struct WindowPreview: View {
                     .opacity(highlightOpacity)
             }
 
-            if !windowSwitcherActive, appearance.useEmbeddedElements {
+            if appearance.useEmbeddedElements {
                 embeddedControlsOverlay(finalIsSelected)
             }
         }
@@ -728,7 +837,11 @@ struct WindowPreview: View {
         }
         .onChange(of: isDraggingOver) { isOver in
             if isOver {
-                startDragTimer()
+                if windowSwitcherActive {
+                    onDragHoverIndexChange?(index)
+                } else {
+                    startDragTimer()
+                }
             } else {
                 cancelDragTimer()
             }

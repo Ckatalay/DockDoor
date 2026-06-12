@@ -57,11 +57,7 @@ extension DockObserver {
         let dockAppPID = dockApp.processIdentifier
         let dockAppElement = AXUIElementCreateApplication(dockAppPID)
 
-        guard let children = try? dockAppElement.children(),
-              let processSwitcherList = children.first(where: { element in
-                  (try? element.subrole()) == "AXProcessSwitcherList"
-              })
-        else {
+        guard let processSwitcherList = findCmdTabSwitcherElement(in: dockAppElement) else {
             return
         }
 
@@ -130,6 +126,8 @@ extension DockObserver {
             cachedWindows = WindowUtil.readCachedWindows(for: app.processIdentifier, sortedBy: .cmdTab)
         }
 
+        let shouldIgnoreSingleWindowApp = Defaults[.ignoreAppsWithSingleWindowInCmdTab] && cachedWindows.count == 1
+
         if Defaults[.showWindowsFromCurrentSpaceOnlyInCmdTab] {
             cachedWindows = WindowUtil.filterWindowsByCurrentSpace(cachedWindows)
         }
@@ -143,12 +141,26 @@ extension DockObserver {
         }
 
         let elementPos = try? selectedItem.element.position()
-        let bestScreen = elementPos?.screen() ?? NSScreen.main!
+        let bestScreen = if let elementPos { NSScreen.screenFromQuartzPoint(elementPos) } else { NSScreen.main! }
 
         Task { @MainActor [weak self] in
             guard let self else { return }
 
-            let initialIndex = Defaults[.cmdTabAutoSelectFirstWindow] && !cachedWindows.isEmpty ? 0 : nil
+            if shouldIgnoreSingleWindowApp {
+                previewCoordinator.hideWindow()
+                return
+            }
+
+            if cachedWindows.isEmpty {
+                if let app = resolvedApp, Defaults[.showWindowlessAppsInCmdTab] {
+                    cachedWindows = [WindowInfo.windowlessEntry(for: app)]
+                } else {
+                    previewCoordinator.hideWindow()
+                    return
+                }
+            }
+
+            let initialIndex = Defaults[.cmdTabAutoSelectFirstWindow] ? 0 : nil
             previewCoordinator.showWindow(
                 appName: appName,
                 windows: cachedWindows,
@@ -195,12 +207,13 @@ extension DockObserver {
                         guard let self else { return }
                         guard let screen = screenOrigin.screen() else { return }
 
-                        previewCoordinator.mergeWindowsIfNeeded(
+                        let didMerge = previewCoordinator.mergeWindowsIfNeeded(
                             appPID,
                             windows: freshWindows,
                             dockPosition: .cmdTab,
                             bestGuessMonitor: screen
                         )
+                        DebugLogger.log("WindowRefresh", details: "Cmd+Tab final merge, PID: \(appPID), windows: \(freshWindows.count), merged: \(didMerge)")
                     }
                 } catch {
                     DebugLogger.log("DockObserver+CmdTab", details: "Failed to fetch windows for Cmd+Tab: \(error)")

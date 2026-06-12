@@ -1,10 +1,13 @@
+import ApplicationServices
 import Defaults
 import SwiftUI
 
 // Pure UI state container for window preview presentation
 class PreviewStateCoordinator: ObservableObject {
     @Published var currIndex: Int = -1
-    @Published var windowSwitcherActive: Bool = false
+    @Published var windowSwitcherActive: Bool = false {
+        didSet { invalidateFilterCache() }
+    }
 
     // MARK: - Keybind Session Tracking
 
@@ -27,17 +30,43 @@ class PreviewStateCoordinator: ObservableObject {
     var hasMovedSinceOpen: Bool = false
     var initialHoverLocation: CGPoint?
     var fullWindowPreviewActive: Bool = false
-    @Published var windows: [WindowInfo] = []
+    @Published var windows: [WindowInfo] = [] {
+        didSet { invalidateFilterCache() }
+    }
+
+    @Published private(set) var focusedWindowID: CGWindowID?
+
     var shouldScrollToIndex: Bool = true
 
     @Published var searchQuery: String = "" {
         didSet {
+            invalidateFilterCache()
             if windowSwitcherActive {
                 Task { @MainActor in
                     updateIndexForSearch()
                 }
             }
         }
+    }
+
+    private var cachedFilteredIndices: [Int]?
+    private func invalidateFilterCache() { cachedFilteredIndices = nil }
+
+    @MainActor
+    func setFocusedWindowID(_ windowID: CGWindowID?) {
+        focusedWindowID = windowID
+    }
+
+    @MainActor
+    func refreshFocusedWindowID(from newWindows: [WindowInfo]? = nil) {
+        focusedWindowID = Self.currentFocusedWindowID(in: newWindows ?? windows)
+    }
+
+    private static func currentFocusedWindowID(in windows: [WindowInfo]) -> CGWindowID? {
+        guard let activeAppWindow = windows.first(where: { $0.app.isActive }),
+              let focusedWindow = try? activeAppWindow.appAxElement.focusedWindow()
+        else { return nil }
+        return try? focusedWindow.cgWindowId()
     }
 
     var hasActiveSearch: Bool {
@@ -113,6 +142,7 @@ class PreviewStateCoordinator: ObservableObject {
     @MainActor
     func setWindows(_ newWindows: [WindowInfo], dockPosition: DockPosition, bestGuessMonitor: NSScreen, isMockPreviewActive: Bool = false) {
         windows = newWindows
+        refreshFocusedWindowID(from: newWindows)
         lastKnownBestGuessMonitor = bestGuessMonitor
 
         if currIndex >= windows.count {
@@ -167,6 +197,7 @@ class PreviewStateCoordinator: ObservableObject {
         }
 
         lastKnownBestGuessMonitor = bestGuessMonitor
+        refreshFocusedWindowID()
         recomputeAndPublishDimensions(dockPosition: dockPosition, bestGuessMonitor: bestGuessMonitor)
 
         if windows.count != previousWindowCount {
@@ -292,18 +323,34 @@ class PreviewStateCoordinator: ObservableObject {
             effectiveGridRows: rows
         )
 
-        let compactThreshold = Defaults[.dockPreviewCompactThreshold]
+        let compactThreshold = if windowSwitcherActive {
+            Defaults[.windowSwitcherCompactThreshold]
+        } else if dockPosition == .cmdTab {
+            Defaults[.cmdTabCompactThreshold]
+        } else {
+            Defaults[.dockPreviewCompactThreshold]
+        }
         let wouldUseCompactMode = Defaults[.disableImagePreview]
             || (compactThreshold > 0 && windows.count >= compactThreshold)
 
-        if Defaults[.allowDynamicImageSizing], !windowSwitcherActive, !wouldUseCompactMode {
+        if Defaults[.allowDynamicImageSizing], !wouldUseCompactMode {
+            let minimumItemWidth = if windowSwitcherActive {
+                min(
+                    newOverallMaxDimension.x,
+                    WindowPreviewHoverContainer.dynamicSwitcherMinimumCardWidth
+                )
+            } else {
+                CGFloat.zero
+            }
             expectedContentSize = Self.computeExpectedContentSize(
                 windowCount: windows.count,
                 dimensionsMap: newDimensionsMap,
-                isHorizontal: dockPosition.isHorizontalFlow,
+                isHorizontal: windowSwitcherActive ? true : dockPosition.isHorizontalFlow,
                 maxColumns: cols,
                 maxRows: rows,
-                hasEmbeddedContent: hasEmbeddedContent
+                hasEmbeddedContent: hasEmbeddedContent,
+                fillToLimit: windowSwitcherActive && Defaults[.windowSwitcherScrollDirection] == .vertical,
+                minimumItemWidth: minimumItemWidth
             )
         } else {
             expectedContentSize = .zero
@@ -318,7 +365,9 @@ class PreviewStateCoordinator: ObservableObject {
         isHorizontal: Bool,
         maxColumns: Int,
         maxRows: Int,
-        hasEmbeddedContent: Bool = false
+        hasEmbeddedContent: Bool = false,
+        fillToLimit: Bool = false,
+        minimumItemWidth: CGFloat = 0
     ) -> CGSize {
         guard windowCount > 0 else { return .zero }
 
@@ -329,14 +378,15 @@ class PreviewStateCoordinator: ObservableObject {
             items: Array(0 ..< windowCount),
             isHorizontal: isHorizontal,
             maxColumns: maxColumns,
-            maxRows: maxRows
+            maxRows: maxRows,
+            fillToLimit: fillToLimit
         )
 
         // Collect both flow-axis total and cross-axis max from all windows
         var maxItemWidth: CGFloat = 0
         var maxItemHeight: CGFloat = 0
         for dim in dimensionsMap.values {
-            maxItemWidth = max(maxItemWidth, dim.size.width)
+            maxItemWidth = max(maxItemWidth, max(dim.size.width, minimumItemWidth))
             maxItemHeight = max(maxItemHeight, dim.size.height)
         }
 
@@ -347,14 +397,15 @@ class PreviewStateCoordinator: ObservableObject {
                 var rowWidth: CGFloat = 0
                 for windowIndex in row {
                     let dims = dimensionsMap[windowIndex]
-                    rowWidth += dims?.size.width ?? dims?.maxDimensions.width ?? 0
+                    let itemWidth = dims?.size.width ?? dims?.maxDimensions.width ?? 0
+                    rowWidth += max(itemWidth, minimumItemWidth)
                 }
                 rowWidth += CGFloat(max(0, row.count - 1)) * itemSpacing
                 maxRowWidth = max(maxRowWidth, rowWidth)
             }
 
             if hasEmbeddedContent, let firstDims = dimensionsMap[0] {
-                maxRowWidth += firstDims.size.width + itemSpacing
+                maxRowWidth += max(firstDims.size.width, minimumItemWidth) + itemSpacing
             }
 
             // Provide both axes: flow width from item sum, cross height from tallest preview
@@ -396,19 +447,23 @@ class PreviewStateCoordinator: ObservableObject {
     /// Returns the indices of windows that match the current search query.
     /// If no search is active, returns all window indices.
     func filteredWindowIndices() -> [Int] {
-        guard windowSwitcherActive, !searchQuery.isEmpty else {
-            return Array(windows.indices)
-        }
+        if let cached = cachedFilteredIndices { return cached }
 
-        let query = searchQuery.lowercased()
-        let fuzziness = Defaults[.searchFuzziness]
-
-        return windows.enumerated().compactMap { idx, win in
-            let appName = win.app.localizedName?.lowercased() ?? ""
-            let windowTitle = (win.windowName ?? "").lowercased()
-            return (StringMatchingUtil.fuzzyMatch(query: query, target: appName, fuzziness: fuzziness) ||
-                StringMatchingUtil.fuzzyMatch(query: query, target: windowTitle, fuzziness: fuzziness)) ? idx : nil
+        let result: [Int]
+        if !windowSwitcherActive || searchQuery.isEmpty {
+            result = Array(windows.indices)
+        } else {
+            let query = searchQuery.lowercased()
+            let fuzziness = Defaults[.searchFuzziness]
+            result = windows.enumerated().compactMap { idx, win in
+                let appName = win.app.localizedName?.lowercased() ?? ""
+                let windowTitle = (win.windowName ?? "").lowercased()
+                return (StringMatchingUtil.fuzzyMatch(query: query, target: appName, fuzziness: fuzziness) ||
+                    StringMatchingUtil.fuzzyMatch(query: query, target: windowTitle, fuzziness: fuzziness)) ? idx : nil
+            }
         }
+        cachedFilteredIndices = result
+        return result
     }
 
     // MARK: - Keyboard Navigation
@@ -533,6 +588,8 @@ class PreviewStateCoordinator: ObservableObject {
     func initializeForWindowSwitcher(with newWindows: [WindowInfo], dockPosition: DockPosition, bestGuessMonitor: NSScreen) {
         setWindows(newWindows, dockPosition: dockPosition, bestGuessMonitor: bestGuessMonitor)
         searchQuery = ""
+        hasMovedSinceOpen = false
+        initialHoverLocation = NSEvent.mouseLocation
 
         if !windows.isEmpty {
             if Defaults[.useClassicWindowOrdering], windows.count >= 2 {

@@ -11,6 +11,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var previewCoordinator: SharedPreviewWindowCoordinator?
     private var keybindHelper: KeybindHelper?
     private var activeAppIndicator: ActiveAppIndicatorCoordinator?
+    private var dockLocker: DockLocker?
     private var statusBarItem: NSStatusItem?
     private var updaterController: SPUStandardUpdaterController
     @ObservedObject var updaterState: UpdaterState
@@ -40,6 +41,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         applyAppearanceMode(Defaults[.appAppearanceMode])
 
+        reconcileImagePreviewWithPermission()
+
         // Set global AX timeout to prevent hangs from unresponsive apps
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1.0)
 
@@ -64,15 +67,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let currentPreviewCoordinator = SharedPreviewWindowCoordinator()
             previewCoordinator = currentPreviewCoordinator
 
-            let needsDockObserver = Defaults[.enableDockPreviews] ||
-                Defaults[.shouldHideOnDockItemClick] ||
-                Defaults[.enableCmdRightClickQuit] ||
-                Defaults[.enableDockScrollGesture]
-
-            if needsDockObserver {
-                let dockObs = DockObserver(previewCoordinator: currentPreviewCoordinator)
-                dockObserver = dockObs
-            }
+            let dockObs = DockObserver(previewCoordinator: currentPreviewCoordinator)
+            dockObserver = dockObs
 
             appClosureObserver = WindowManipulationObservers(previewCoordinator: currentPreviewCoordinator)
 
@@ -82,6 +78,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             if Defaults[.showActiveAppIndicator] {
                 activeAppIndicator = ActiveAppIndicatorCoordinator()
+            }
+
+            if Defaults[.enableDockLocking] {
+                dockLocker = DockLocker()
             }
 
             if updater.automaticallyChecksForUpdates {
@@ -104,6 +104,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if Defaults[.reopenSettingsAfterRestart] {
             Defaults[.reopenSettingsAfterRestart] = false
             openSettingsWindow(nil)
+        }
+    }
+
+    // Clear the onboarding skip's disableImagePreview only when permission was newly granted since last launch, so skip-then-grant users get previews back without overriding a deliberate "Always use compact mode" choice.
+    private func reconcileImagePreviewWithPermission() {
+        let hasPermission = WindowUtil.hasScreenRecordingPermission()
+        let hadPermission = Defaults[.lastKnownScreenRecordingPermission]
+        Defaults[.lastKnownScreenRecordingPermission] = hasPermission
+
+        if hasPermission, !hadPermission, Defaults[.disableImagePreview] {
+            Defaults[.disableImagePreview] = false
         }
     }
 
@@ -144,6 +155,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: String(localized: "Check for Updates…"), action: #selector(checkForUpdatesWrapper), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: String(localized: "Support DockDoor"), action: #selector(openDonationPage), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: String(localized: "Leave a Review"), action: #selector(openReviewPage), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: String(localized: "Restart DockDoor"), action: #selector(restartAppWrapper), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: String(localized: "Quit DockDoor"), action: #selector(quitAppWrapper), keyEquivalent: "q"))
@@ -180,6 +192,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func openReviewPage() {
+        if let url = URL(string: "https://www.producthunt.com/products/dockdoor/reviews") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     private var wakeRecoveryTask: Task<Void, Never>?
 
     @objc private func handleSystemWake() {
@@ -208,10 +226,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                NSApp.activate(ignoringOtherApps: true)
                 dockObserver?.reset()
                 keybindHelper?.reset()
                 appClosureObserver?.reset()
+                dockLocker?.reset()
             }
         }
     }
@@ -238,9 +256,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleFirstTimeLaunch() {
         let currentMouseLocation = CGEvent(source: nil)?.location ?? .zero
-        let screen = NSScreen.screenContainingMouse(currentMouseLocation)
-
-        Defaults[.launched] = true
+        let screen = NSScreen.screenFromQuartzPoint(currentMouseLocation)
 
         if !Defaults[.showAnimations] || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             showOnboardingWindow(on: screen)

@@ -19,22 +19,29 @@ struct MediaControlsFullView: View {
     let appIcon: NSImage?
     let hoveringAppIcon: Bool
     let hoveringWindowTitle: Bool
+    let backgroundAppearance: BackgroundAppearance
 
     @Default(.showAnimations) var showAnimations
 
     @State private var initialContentSize: CGSize = .zero
     @State private var hasSetInitialSize: Bool = false
 
+    private var displayAppName: String {
+        mediaInfo.appName.isEmpty ? appName : mediaInfo.appName
+    }
+
     var body: some View {
         WidgetHoverContainer(
-            appName: appName,
+            appName: displayAppName,
+            bundleIdentifier: bundleIdentifier,
             bestGuessMonitor: bestGuessMonitor,
             dockPosition: dockPosition,
             dockItemElement: dockItemElement,
             isPinnedMode: isPinnedMode,
             appIcon: appIcon,
             hoveringAppIcon: hoveringAppIcon,
-            highlightColor: dominantArtworkColor
+            highlightColor: dominantArtworkColor,
+            backgroundAppearance: backgroundAppearance
         ) {
             mediaControlsContent()
         }
@@ -51,12 +58,12 @@ struct MediaControlsFullView: View {
         Group {
             if isLoadingMediaInfo || mediaInfo.title.isEmpty {
                 MediaControlsSkeleton(isEmbedded: false)
+                    .frame(width: MediaControlsLayout.compactContentWidth)
+            } else if isArtworkExpandedFull {
+                expandedMediaControlsCore()
             } else {
-                if isArtworkExpandedFull {
-                    expandedMediaControlsCore()
-                } else {
-                    compactMediaControlsCore()
-                }
+                compactMediaControlsCore()
+                    .frame(width: MediaControlsLayout.compactContentWidth)
             }
         }
         .animation(showAnimations ? .spring(response: 0.45, dampingFraction: 0.8) : nil, value: isArtworkExpandedFull)
@@ -89,20 +96,18 @@ struct MediaControlsFullView: View {
                         startDelay: 1
                     )
                     .fontWeight(.semibold)
-                    .animation(showAnimations ? .easeInOut(duration: 0.2) : nil, value: mediaInfo.title)
                     .id("compact-full-title-\(mediaInfo.title)")
 
-                    if !mediaInfo.artist.isEmpty {
-                        MarqueeText(
-                            text: mediaInfo.artist,
-                            startDelay: 1
-                        )
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .animation(showAnimations ? .easeInOut(duration: 0.2) : nil, value: mediaInfo.artist)
-                        .id("compact-full-artist-\(mediaInfo.artist)")
-                    }
+                    MarqueeText(
+                        text: mediaInfo.artist.isEmpty ? " " : mediaInfo.artist,
+                        startDelay: 1
+                    )
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .opacity(mediaInfo.artist.isEmpty ? 0 : 1)
+                    .id("compact-full-artist-\(mediaInfo.artist)")
                 }
+                .frame(height: MediaControlsLayout.artworkSize, alignment: .center)
                 Spacer(minLength: 0)
             }
 
@@ -112,7 +117,6 @@ struct MediaControlsFullView: View {
                 showingLyrics: false
             )
         }
-        .animation(showAnimations ? .smooth(duration: 0.2) : nil, value: "\(mediaInfo.title)\(mediaInfo.artist)")
     }
 
     @ViewBuilder
@@ -182,7 +186,8 @@ struct MediaControlsFullView: View {
                     mediaInfo: mediaInfo,
                     width: MediaControlsLayout.fullLyricsViewWidth + 80,
                     maxHeight: 300,
-                    isFullMode: true
+                    isFullMode: true,
+                    backgroundAppearance: backgroundAppearance
                 )
             }
         }

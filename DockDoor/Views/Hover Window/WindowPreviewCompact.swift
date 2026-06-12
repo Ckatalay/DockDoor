@@ -1,7 +1,7 @@
 import Defaults
 import SwiftUI
 
-struct WindowPreviewCompact: View {
+struct WindowPreviewCompact: View, Equatable {
     let windowInfo: WindowInfo
     let index: Int
     let dockPosition: DockPosition
@@ -13,22 +13,29 @@ struct WindowPreviewCompact: View {
     let onTap: (() -> Void)?
     let onHoverIndexChange: ((Int?, CGPoint?) -> Void)?
     var appearance: PreviewAppearanceSettings
-
-    @Default(.previewWidth) private var previewWidth
-    @Default(.compactModeTitleFormat) private var titleFormat
-    @Default(.compactModeItemSize) private var itemSize
-    @Default(.compactModeHideTrafficLights) private var hideTrafficLights
-    @Default(.enableTitleMarquee) private var enableTitleMarquee
+    let backgroundAppearance: BackgroundAppearance
+    let focusedWindowID: CGWindowID?
 
     @State private var isHovering = false
+
+    private var isHighlighted: Bool {
+        isSelected || (!windowSwitcherActive && isHovering)
+    }
+
+    static func == (l: Self, r: Self) -> Bool {
+        l.index == r.index && l.isSelected == r.isSelected
+            && l.uniformCardRadius == r.uniformCardRadius
+            && l.windowSwitcherActive == r.windowSwitcherActive
+            && l.appearance == r.appearance
+            && l.windowInfo.viewSnapshot == r.windowInfo.viewSnapshot
+            && l.backgroundAppearance == r.backgroundAppearance
+            && l.focusedWindowID == r.focusedWindowID
+    }
 
     /// Checks if this window is the currently active (focused) window on the system and adds a border if so.
     private var isActiveWindow: Bool {
         guard appearance.showActiveWindowBorder else { return false }
         guard windowInfo.app.isActive else { return false }
-        guard let focusedWindow = try? windowInfo.appAxElement.focusedWindow(),
-              let focusedWindowID = try? focusedWindow.cgWindowId()
-        else { return false }
         return windowInfo.id == focusedWindowID
     }
 
@@ -45,6 +52,9 @@ struct WindowPreviewCompact: View {
     }
 
     private var stateIndicator: String? {
+        if windowInfo.isWindowlessApp {
+            return String(localized: "No Open Windows", comment: "Label for running apps without any open windows in the window switcher")
+        }
         guard appearance.showMinimizedHiddenLabels,
               appearance.trafficLightVisibility != .never
         else { return nil }
@@ -56,6 +66,22 @@ struct WindowPreviewCompact: View {
         return nil
     }
 
+    private var shouldShowTrafficLightButtons: Bool {
+        guard !appearance.compactModeHideTrafficLights else { return false }
+        guard appearance.trafficLightVisibility != .never else { return false }
+
+        if windowInfo.isWindowlessApp {
+            return appearance.showWindowlessAppQuitButton
+        }
+
+        return windowInfo.closeButton != nil &&
+            (!appearance.showMinimizedHiddenLabels || (!windowInfo.isMinimized && !windowInfo.isHidden))
+    }
+
+    private var enabledTrafficLightButtons: Set<WindowAction> {
+        windowInfo.isWindowlessApp ? [.quit] : appearance.enabledTrafficLightButtons
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             // App icon
@@ -63,39 +89,41 @@ struct WindowPreviewCompact: View {
                 Image(nsImage: appIcon)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: itemSize.iconSize, height: itemSize.iconSize)
+                    .frame(width: appearance.compactModeItemSize.iconSize, height: appearance.compactModeItemSize.iconSize)
             } else {
                 Image(systemName: "app.fill")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: itemSize.iconSize, height: itemSize.iconSize)
+                    .frame(width: appearance.compactModeItemSize.iconSize, height: appearance.compactModeItemSize.iconSize)
                     .foregroundStyle(.secondary)
             }
 
-            // Title content based on format
-            VStack(alignment: .leading, spacing: 2) {
-                switch titleFormat {
-                case .appNameAndTitle:
-                    titleText(appName, isPrimary: true)
-                    // Show state instead of window title when minimized/hidden
-                    if let state = stateIndicator {
-                        stateText(state)
-                    } else if let title = windowTitle {
-                        titleText(title, isPrimary: false)
-                    }
+            if appearance.showAppHeader {
+                // Title content based on format
+                VStack(alignment: .leading, spacing: 2) {
+                    switch appearance.compactModeTitleFormat {
+                    case .appNameAndTitle:
+                        titleText(appName, isPrimary: true)
+                        // Show state instead of window title when minimized/hidden
+                        if let state = stateIndicator {
+                            stateText(state)
+                        } else if let title = windowTitle {
+                            titleText(title, isPrimary: false)
+                        }
 
-                case .titleOnly:
-                    titleText(windowTitle ?? appName, isPrimary: true)
-                    // Show state below the title
-                    if let state = stateIndicator {
-                        stateText(state)
-                    }
+                    case .titleOnly:
+                        titleText(windowTitle ?? appName, isPrimary: true)
+                        // Show state below the title
+                        if let state = stateIndicator {
+                            stateText(state)
+                        }
 
-                case .appNameOnly:
-                    titleText(appName, isPrimary: true)
-                    // Show state below app name
-                    if let state = stateIndicator {
-                        stateText(state)
+                    case .appNameOnly:
+                        titleText(appName, isPrimary: true)
+                        // Show state below app name
+                        if let state = stateIndicator {
+                            stateText(state)
+                        }
                     }
                 }
             }
@@ -103,36 +131,33 @@ struct WindowPreviewCompact: View {
             Spacer(minLength: 0)
 
             // Traffic light buttons
-            if !hideTrafficLights,
-               windowInfo.closeButton != nil,
-               appearance.trafficLightVisibility != .never,
-               !appearance.showMinimizedHiddenLabels || (!windowInfo.isMinimized && !windowInfo.isHidden)
-            {
+            if shouldShowTrafficLightButtons {
                 TrafficLightButtons(
                     displayMode: appearance.trafficLightVisibility,
                     hoveringOverParentWindow: isSelected || isHovering,
                     onWindowAction: handleWindowAction,
                     pillStyling: true,
                     mockPreviewActive: mockPreviewActive,
-                    enabledButtons: appearance.enabledTrafficLightButtons,
+                    enabledButtons: enabledTrafficLightButtons,
                     useMonochrome: appearance.useMonochromeTrafficLights,
-                    buttonScale: appearance.trafficLightButtonScale
+                    buttonScale: appearance.trafficLightButtonScale,
+                    backgroundAppearance: backgroundAppearance
                 )
             }
         }
         .padding(.vertical, 8)
-        .frame(width: previewWidth, height: itemSize.rowHeight, alignment: .leading)
+        .frame(width: appearance.previewWidth, height: appearance.compactModeItemSize.rowHeight, alignment: .leading)
         .clipped()
         .background {
             let cornerRadius = uniformCardRadius ? CardRadius.base + (CardRadius.innerPadding * appearance.globalPaddingMultiplier) : CardRadius.fallback
 
             if !appearance.hidePreviewCardBackground {
-                BlurView(variant: 18)
+                BlurView(cornerRadius: cornerRadius, appearance: backgroundAppearance)
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
                     .borderedBackground(.primary.opacity(0.1), lineWidth: 1.75, cornerRadius: cornerRadius)
                     .padding(.horizontal, -CardRadius.innerPadding)
                     .overlay {
-                        if isSelected || isHovering {
+                        if isHighlighted {
                             let highlightColor = appearance.hoverHighlightColor ?? Color(nsColor: .controlAccentColor)
                             RoundedRectangle(cornerRadius: cornerRadius)
                                 .fill(highlightColor.opacity(appearance.selectionOpacity))
@@ -148,7 +173,8 @@ struct WindowPreviewCompact: View {
                     }
             }
         }
-        .opacity((isSelected || isHovering) ? 1.0 : appearance.unselectedContentOpacity)
+        .opacity(isHighlighted ? 1.0 : appearance.unselectedContentOpacity)
+        .padding(.horizontal, CardRadius.innerPadding)
         .contentShape(Rectangle())
         .onContinuousHover { phase in
             let setHoverState: (Bool) -> Void = { newState in
@@ -180,24 +206,28 @@ struct WindowPreviewCompact: View {
 
     @ViewBuilder
     private func titleText(_ text: String, isPrimary: Bool) -> some View {
-        let font = isPrimary ? itemSize.primaryFont : itemSize.secondaryFont
-        if enableTitleMarquee {
+        let font = isPrimary ? appearance.compactModeItemSize.primaryFont : appearance.compactModeItemSize.secondaryFont
+        switch appearance.titleOverflowStyle {
+        case .marquee:
             MarqueeText(text: text, startDelay: 1)
                 .font(font)
                 .foregroundStyle(isPrimary ? .primary : .secondary)
-        } else {
-            Text(text)
-                .font(font)
-                .foregroundStyle(isPrimary ? .primary : .secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
+        case .truncateTail:
+            Text(text).font(font).foregroundStyle(isPrimary ? .primary : .secondary)
+                .lineLimit(1).truncationMode(.tail)
+        case .truncateMiddle:
+            Text(text).font(font).foregroundStyle(isPrimary ? .primary : .secondary)
+                .lineLimit(1).truncationMode(.middle)
+        case .truncateHead:
+            Text(text).font(font).foregroundStyle(isPrimary ? .primary : .secondary)
+                .lineLimit(1).truncationMode(.head)
         }
     }
 
     @ViewBuilder
     private func stateText(_ text: String) -> some View {
         Text(text)
-            .font(itemSize.secondaryFont)
+            .font(appearance.compactModeItemSize.secondaryFont)
             .foregroundStyle(.secondary)
             .italic()
     }

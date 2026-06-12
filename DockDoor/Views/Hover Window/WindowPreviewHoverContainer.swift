@@ -106,6 +106,11 @@ struct WindowPreviewHoverContainer: View {
     @State private var edgeScrollTimer: Timer?
     @State private var edgeScrollDirection: CGFloat = 0
     @State private var cachedScrollView: NSScrollView?
+    @State private var edgeScrollHoverSize: CGSize = .zero
+    @State private var scrolledFromStart = false
+    @State private var dynamicFadeEnabled = false
+    @State private var cachedAppearance: PreviewAppearanceSettings? = nil
+    @State private var backgroundAppearance: BackgroundAppearance = .resolve()
 
     init(appName: String,
          onWindowTap: (() -> Void)?,
@@ -140,8 +145,8 @@ struct WindowPreviewHoverContainer: View {
         let calculatedDimensionsMap = previewStateCoordinator.dimensionState.windowDimensionsMap
 
         guard !calculatedDimensionsMap.isEmpty else {
-            // Fallback to skeleton width if no windows
-            return MediaControlsLayout.embeddedArtworkSize + MediaControlsLayout.artworkTextSpacing + 165
+            let fallback = MediaControlsLayout.embeddedArtworkSize + MediaControlsLayout.artworkTextSpacing + 165
+            return shouldUseCompactMode ? previewWidth : fallback
         }
 
         var minWidth = 0.0
@@ -151,6 +156,10 @@ struct WindowPreviewHoverContainer: View {
             if minWidth == 0 || width < minWidth {
                 minWidth = width
             }
+        }
+
+        if shouldUseCompactMode {
+            return previewWidth
         }
 
         return minWidth
@@ -202,7 +211,6 @@ struct WindowPreviewHoverContainer: View {
     }
 
     private var effectiveShouldShowHeader: Bool {
-        // Window switcher doesn't show the container header
         if previewStateCoordinator.windowSwitcherActive {
             return false
         }
@@ -235,10 +243,30 @@ struct WindowPreviewHoverContainer: View {
         previewStateCoordinator.setIndex(to: hoveredIndex, shouldScroll: false)
     }
 
-    var body: some View {
-        BaseHoverContainer(bestGuessMonitor: bestGuessMonitor, mockPreviewActive: mockPreviewActive) {
-            windowGridContent()
+    private func handleDragHoverIndexChange(_ hoveredIndex: Int?) {
+        guard enableMouseHoverInSwitcher else { return }
+        guard let hoveredIndex else { return }
+        guard hoveredIndex != previewStateCoordinator.currIndex else { return }
+
+        if !previewStateCoordinator.hasMovedSinceOpen,
+           let initial = previewStateCoordinator.initialHoverLocation
+        {
+            let screenLocation = NSEvent.mouseLocation
+            let distance = hypot(screenLocation.x - initial.x, screenLocation.y - initial.y)
+            guard distance > 1 else { return }
+            previewStateCoordinator.hasMovedSinceOpen = true
         }
+
+        previewStateCoordinator.setIndex(to: hoveredIndex, shouldScroll: false)
+    }
+
+    var body: some View {
+        BaseHoverContainer(
+            bestGuessMonitor: bestGuessMonitor,
+            mockPreviewActive: mockPreviewActive,
+            content: { windowGridContent() },
+            backgroundAppearance: backgroundAppearance
+        )
         .contentShape(Rectangle())
         .onTapGesture {
             activateApp()
@@ -246,9 +274,11 @@ struct WindowPreviewHoverContainer: View {
         .padding(.top, (!previewStateCoordinator.windowSwitcherActive && effectiveAppNameStyle == .popover && effectiveShowAppName) ? 30 : 0)
         .onAppear {
             loadAppIcon()
-            // Only use LiveCaptureManager when live preview AND keep-alive are both enabled
             if Defaults[.enableLivePreview], Defaults[.livePreviewStreamKeepAlive] != 0 {
                 LiveCaptureManager.shared.panelOpened()
+            }
+            if #available(macOS 15.0, *) {
+                dynamicFadeEnabled = true
             }
         }
         .onDisappear {
@@ -260,6 +290,18 @@ struct WindowPreviewHoverContainer: View {
             if !isActive {
                 previewStateCoordinator.searchQuery = ""
                 stopEdgeScroll()
+            }
+        }
+        .task(id: previewStateCoordinator.windowSwitcherActive) {
+            let keys = PreviewAppearanceSettings.observedKeys + BackgroundAppearance.observedKeys
+            for await _ in Defaults.updates(keys, initial: true) {
+                let updated = PreviewAppearanceSettings.resolve(
+                    windowSwitcherActive: previewStateCoordinator.windowSwitcherActive,
+                    dockPosition: dockPosition
+                )
+                if updated != cachedAppearance { cachedAppearance = updated }
+                let updatedBg = BackgroundAppearance.resolve()
+                if updatedBg != backgroundAppearance { backgroundAppearance = updatedBg }
             }
         }
     }
@@ -289,7 +331,7 @@ struct WindowPreviewHoverContainer: View {
                 currentMaxDimensionForPreviews: calculatedMaxDimension,
                 currentDimensionsMapForPreviews: calculatedDimensionsMap
             )
-            .fadeOnEdges(axis: scrollAxis == .horizontal ? .horizontal : .vertical, fadeLength: 20)
+            .fadeOnEdges(axis: scrollAxis == .horizontal ? .horizontal : .vertical, fadeLength: 20, disableLeading: dynamicFadeEnabled && !scrolledFromStart)
             .padding(.top, (!previewStateCoordinator.windowSwitcherActive && effectiveAppNameStyle == .default && effectiveShowAppName) ? 25 : 0)
             .overlay(alignment: effectiveAppNameStyle == .popover ? .top : .topLeading) {
                 hoverTitleBaseView(labelSize: measureString(appName, fontSize: 14))
@@ -298,7 +340,7 @@ struct WindowPreviewHoverContainer: View {
                     }
             }
             .overlay {
-                if !mockPreviewActive, !isDragging, dockPosition != .cmdTab {
+                if !mockPreviewActive, !isDragging {
                     WindowDismissalContainer(appName: appName,
                                              bestGuessMonitor: bestGuessMonitor,
                                              dockPosition: dockPosition,
@@ -324,9 +366,15 @@ struct WindowPreviewHoverContainer: View {
                         .clipShape(RoundedRectangle(cornerRadius: CardRadius.container, style: .continuous))
                 }
             }
-            .overlay {
-                if enableMouseHoverInSwitcher, previewStateCoordinator.windowSwitcherActive {
-                    edgeScrollZones(isHorizontal: orientationIsHorizontal)
+            .measure($edgeScrollHoverSize)
+            .onContinuousHover { phase in
+                guard enableMouseHoverInSwitcher, previewStateCoordinator.windowSwitcherActive else { return }
+
+                switch phase {
+                case let .active(location):
+                    handleEdgeScrollHover(at: location, isHorizontal: orientationIsHorizontal)
+                case .ended:
+                    stopEdgeScroll()
                 }
             }
         }
@@ -335,9 +383,11 @@ struct WindowPreviewHoverContainer: View {
     private func handleWindowDrop(at location: CGPoint, for index: Int) {
         guard index < previewStateCoordinator.windows.count else { return }
         let window = previewStateCoordinator.windows[index]
+        guard !window.isWindowlessApp else { return }
 
-        let currentScreen = NSScreen.screenContainingMouse(location)
+        let currentScreen = NSScreen.screenFromQuartzPoint(location)
         let globalLocation = DockObserver.cgPointFromNSPoint(location, forScreen: currentScreen)
+        window.moveToCurrentManagedSpace(mouseLocation: location)
 
         let finalPosition = CGPoint(
             x: globalLocation.x,
@@ -346,6 +396,10 @@ struct WindowPreviewHoverContainer: View {
 
         if let positionValue = AXValue.from(point: finalPosition) {
             try? window.axElement.setAttribute(kAXPositionAttribute, positionValue)
+            WindowUtil.updateCachedWindowState(
+                window,
+                screenIdentifier: .some(currentScreen.uniqueIdentifier())
+            )
             window.bringToFront()
             onWindowTap?()
         }
@@ -455,7 +509,7 @@ struct WindowPreviewHoverContainer: View {
                     }
                     .padding(.vertical, 5)
                     .padding(.horizontal, 10)
-                    .dockStyle(cornerRadius: 10, frostedTranslucentLayer: true)
+                    .dockStyle(backgroundAppearance: backgroundAppearance, cornerRadius: 10)
                     .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .onHover { hover in
                         hoveringAppIcon = hover
@@ -500,7 +554,7 @@ struct WindowPreviewHoverContainer: View {
                 Button {
                     closeAllWindows()
                 } label: {
-                    MarqueeText(text: "Close All", startDelay: 1)
+                    Text("Close All")
                         .font(.caption)
                         .lineLimit(1)
                 }
@@ -509,7 +563,7 @@ struct WindowPreviewHoverContainer: View {
                 Button {
                     minimizeAllWindows()
                 } label: {
-                    MarqueeText(text: "Minimize All", startDelay: 1)
+                    Text("Minimize All")
                         .font(.caption)
                         .lineLimit(1)
                 }
@@ -650,35 +704,49 @@ struct WindowPreviewHoverContainer: View {
         currentDimensionsMapForPreviews: [Int: WindowDimensions]
     ) -> some View {
         let cachedFilteredIndices = filteredWindowIndices()
-        let appearance = appearanceOverride ?? PreviewAppearanceSettings.resolve(
+        let appearance = appearanceOverride ?? cachedAppearance ?? PreviewAppearanceSettings.resolve(
             windowSwitcherActive: previewStateCoordinator.windowSwitcherActive,
             dockPosition: dockPosition
         )
         ScrollView(scrollAxis, showsIndicators: false) {
             Group {
-                // Show no results view when search is active and no results found
                 if shouldShowNoResultsView() {
                     noResultsView()
                 } else if shouldUseCompactMode {
-                    // Compact mode: simple vertical list
                     let flowItems = createFlowItems(filteredIndices: cachedFilteredIndices)
-                    LazyVStack(spacing: 4) {
-                        ForEach(flowItems, id: \.id) { item in
-                            buildFlowItem(
-                                item: item,
-                                isHorizontal: isHorizontal,
-                                currentMaxDimensionForPreviews: currentMaxDimensionForPreviews,
-                                currentDimensionsMapForPreviews: currentDimensionsMapForPreviews,
-                                filteredIndices: cachedFilteredIndices,
-                                appearance: appearance
-                            )
+                    if previewStateCoordinator.windowSwitcherActive {
+                        LazyVStack(spacing: 4) {
+                            ForEach(flowItems, id: \.id) { item in
+                                buildFlowItem(
+                                    item: item,
+                                    isHorizontal: isHorizontal,
+                                    currentMaxDimensionForPreviews: currentMaxDimensionForPreviews,
+                                    currentDimensionsMapForPreviews: currentDimensionsMapForPreviews,
+                                    filteredIndices: cachedFilteredIndices,
+                                    appearance: appearance
+                                )
+                            }
+                        }
+                    } else {
+                        VStack(spacing: 4) {
+                            ForEach(flowItems, id: \.id) { item in
+                                buildFlowItem(
+                                    item: item,
+                                    isHorizontal: isHorizontal,
+                                    currentMaxDimensionForPreviews: currentMaxDimensionForPreviews,
+                                    currentDimensionsMapForPreviews: currentDimensionsMapForPreviews,
+                                    filteredIndices: cachedFilteredIndices,
+                                    appearance: appearance
+                                )
+                            }
                         }
                     }
                 } else if isHorizontal {
                     let chunkedItems = createChunkedItems(filteredIndices: cachedFilteredIndices)
-                    LazyVStack(alignment: .leading, spacing: HoverContainerPadding.itemSpacing) {
+                    let rowAlignment: HorizontalAlignment = previewStateCoordinator.windowSwitcherActive && appearance.allowDynamicImageSizing ? .center : .leading
+                    LazyVStack(alignment: rowAlignment, spacing: HoverContainerPadding.itemSpacing) {
                         ForEach(Array(chunkedItems.enumerated()), id: \.offset) { index, rowItems in
-                            LazyHStack(spacing: HoverContainerPadding.itemSpacing) {
+                            HStack(spacing: HoverContainerPadding.itemSpacing) {
                                 ForEach(rowItems, id: \.id) { item in
                                     buildFlowItem(
                                         item: item,
@@ -696,7 +764,7 @@ struct WindowPreviewHoverContainer: View {
                     let chunkedItems = createChunkedItems(filteredIndices: cachedFilteredIndices)
                     LazyHStack(alignment: .top, spacing: HoverContainerPadding.itemSpacing) {
                         ForEach(Array(chunkedItems.enumerated()), id: \.offset) { index, colItems in
-                            LazyVStack(spacing: HoverContainerPadding.itemSpacing) {
+                            VStack(spacing: HoverContainerPadding.itemSpacing) {
                                 ForEach(colItems, id: \.id) { item in
                                     buildFlowItem(
                                         item: item,
@@ -715,11 +783,11 @@ struct WindowPreviewHoverContainer: View {
             .frame(alignment: .topLeading)
             .globalPadding(20)
         }
+        .trackScrollOffset(axis: scrollAxis, scrolledFromStart: $scrolledFromStart)
         .padding(2)
         .animation(showAnimations ? .smooth(duration: 0.1) : nil, value: previewStateCoordinator.windows.count)
         .onChange(of: previewStateCoordinator.currIndex) { newIndex in
             guard previewStateCoordinator.shouldScrollToIndex else { return }
-
             scrollProxy.scrollTo("\(appName)-\(newIndex)", anchor: .center)
         }
     }
@@ -779,49 +847,43 @@ struct WindowPreviewHoverContainer: View {
         return nil
     }
 
-    @ViewBuilder
-    private func edgeScrollZones(isHorizontal: Bool) -> some View {
+    private func handleEdgeScrollHover(at location: CGPoint, isHorizontal: Bool) {
         let edgeSize: CGFloat = 50
+        let toolbarExclusion: CGFloat = 46
+        let appearance = appearanceOverride ?? cachedAppearance ?? PreviewAppearanceSettings.resolve(
+            windowSwitcherActive: previewStateCoordinator.windowSwitcherActive,
+            dockPosition: dockPosition
+        )
+        let topExclusion = appearance.controlPosition.showsOnTop ? toolbarExclusion : 0
+        let bottomExclusion = appearance.controlPosition.showsOnBottom ? toolbarExclusion : 0
+        let width = edgeScrollHoverSize.width
+        let height = edgeScrollHoverSize.height
+
+        guard width > 0, height > 0 else {
+            stopEdgeScroll()
+            return
+        }
+
+        guard location.y >= topExclusion, location.y <= height - bottomExclusion else {
+            stopEdgeScroll()
+            return
+        }
 
         if isHorizontal {
-            HStack {
-                // Leading edge
-                Color.clear
-                    .frame(width: edgeSize)
-                    .contentShape(Rectangle())
-                    .onHover { hovering in
-                        if hovering { startEdgeScroll(direction: -1, isHorizontal: true) }
-                        else { stopEdgeScroll() }
-                    }
-                Spacer()
-                // Trailing edge
-                Color.clear
-                    .frame(width: edgeSize)
-                    .contentShape(Rectangle())
-                    .onHover { hovering in
-                        if hovering { startEdgeScroll(direction: 1, isHorizontal: true) }
-                        else { stopEdgeScroll() }
-                    }
+            if location.x <= edgeSize {
+                startEdgeScroll(direction: -1, isHorizontal: true)
+            } else if location.x >= width - edgeSize {
+                startEdgeScroll(direction: 1, isHorizontal: true)
+            } else {
+                stopEdgeScroll()
             }
         } else {
-            VStack {
-                // Top edge
-                Color.clear
-                    .frame(height: edgeSize)
-                    .contentShape(Rectangle())
-                    .onHover { hovering in
-                        if hovering { startEdgeScroll(direction: -1, isHorizontal: false) }
-                        else { stopEdgeScroll() }
-                    }
-                Spacer()
-                // Bottom edge
-                Color.clear
-                    .frame(height: edgeSize)
-                    .contentShape(Rectangle())
-                    .onHover { hovering in
-                        if hovering { startEdgeScroll(direction: 1, isHorizontal: false) }
-                        else { stopEdgeScroll() }
-                    }
+            if location.y <= topExclusion + edgeSize {
+                startEdgeScroll(direction: -1, isHorizontal: false)
+            } else if location.y >= height - bottomExclusion - edgeSize {
+                startEdgeScroll(direction: 1, isHorizontal: false)
+            } else {
+                stopEdgeScroll()
             }
         }
     }
@@ -1021,11 +1083,10 @@ struct WindowPreviewHoverContainer: View {
         }
 
         var itemsToProcess: [FlowItem] = []
-
+        itemsToProcess.reserveCapacity(filteredIndices.count + (embeddedContentType != .none ? 1 : 0))
         for index in filteredIndices {
             itemsToProcess.append(.window(index))
         }
-
         if embeddedContentType != .none {
             itemsToProcess.append(.embedded)
         }
@@ -1077,9 +1138,11 @@ struct WindowPreviewHoverContainer: View {
             let dims = currentDimensionsMapForPreviews[filteredIndices.first ?? 0]
             embeddedContentView()
                 .frame(
-                    minWidth: isHorizontal ? nil : dims?.size.width,
-                    minHeight: isHorizontal ? dims?.size.height : nil
+                    minWidth: shouldUseCompactMode ? nil : (isHorizontal ? nil : dims?.size.width),
+                    maxWidth: shouldUseCompactMode ? appearance.previewWidth + 2 * CardRadius.innerPadding : nil,
+                    minHeight: isHorizontal ? (shouldUseCompactMode ? nil : dims?.size.height) : nil
                 )
+                .fixedSize(horizontal: false, vertical: shouldUseCompactMode)
                 .id("\(appName)-embedded")
         case let .window(index):
             let windows = previewStateCoordinator.windows
@@ -1119,7 +1182,27 @@ struct WindowPreviewHoverContainer: View {
 
                 let isSelected = index == previewStateCoordinator.currIndex
 
-                if useCompactForThisWindow {
+                let itemID = "\(appName)-\(index)"
+                if windowInfo.isWindowlessApp, !shouldUseCompactMode {
+                    WindowlessAppPreview(
+                        windowInfo: windowInfo,
+                        index: index,
+                        dockPosition: dockPosition,
+                        uniformCardRadius: uniformCardRadius,
+                        isSelected: isSelected,
+                        windowSwitcherActive: previewStateCoordinator.windowSwitcherActive,
+                        dimensions: getDimensions(for: index, dimensionsMap: currentDimensionsMapForPreviews),
+                        onTap: onWindowTap,
+                        onHoverIndexChange: handleHoverIndexChange,
+                        handleWindowAction: { action in
+                            handleWindowAction(action, at: index)
+                        },
+                        appearance: appearance,
+                        backgroundAppearance: backgroundAppearance
+                    )
+                    .equatable()
+                    .id(itemID)
+                } else if useCompactForThisWindow {
                     WindowPreviewCompact(
                         windowInfo: windowInfo,
                         index: index,
@@ -1133,9 +1216,12 @@ struct WindowPreviewHoverContainer: View {
                         mockPreviewActive: mockPreviewActive,
                         onTap: onWindowTap,
                         onHoverIndexChange: handleHoverIndexChange,
-                        appearance: appearance
+                        appearance: appearance,
+                        backgroundAppearance: backgroundAppearance,
+                        focusedWindowID: previewStateCoordinator.focusedWindowID
                     )
-                    .id("\(appName)-\(index)")
+                    .equatable()
+                    .id(itemID)
                 } else {
                     WindowPreview(
                         windowInfo: windowInfo,
@@ -1153,10 +1239,14 @@ struct WindowPreviewHoverContainer: View {
                         showAppIconOnly: effectiveShowAppIconOnly,
                         mockPreviewActive: mockPreviewActive,
                         onHoverIndexChange: handleHoverIndexChange,
+                        onDragHoverIndexChange: handleDragHoverIndexChange,
                         useLivePreview: useLivePreview,
-                        appearance: appearance
+                        appearance: appearance,
+                        backgroundAppearance: backgroundAppearance,
+                        focusedWindowID: previewStateCoordinator.focusedWindowID
                     )
-                    .id("\(appName)-\(index)")
+                    .equatable()
+                    .id(itemID)
                     .gesture(
                         DragGesture(minimumDistance: 3, coordinateSpace: .global)
                             .onChanged { value in

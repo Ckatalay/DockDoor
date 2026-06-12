@@ -12,18 +12,21 @@ struct CalendarFullView: View {
     let appIcon: NSImage?
     let hoveringAppIcon: Bool
     let hoveringWindowTitle: Bool
+    let backgroundAppearance: BackgroundAppearance
 
     @Default(.uniformCardRadius) private var uniformCardRadius
 
     var body: some View {
         WidgetHoverContainer(
             appName: appName,
+            bundleIdentifier: bundleIdentifier,
             bestGuessMonitor: bestGuessMonitor,
             dockPosition: dockPosition,
             dockItemElement: dockItemElement,
             isPinnedMode: isPinnedMode,
             appIcon: appIcon,
-            hoveringAppIcon: hoveringAppIcon
+            hoveringAppIcon: hoveringAppIcon,
+            backgroundAppearance: backgroundAppearance
         ) {
             CalendarContentView(calendarInfo: calendarInfo)
         }

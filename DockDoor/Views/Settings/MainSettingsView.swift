@@ -41,8 +41,10 @@ struct MainSettingsView: View {
         SettingsGroup(header: "Application Basics") {
             VStack(alignment: .leading, spacing: 10) {
                 LaunchAtLogin.Toggle(String(localized: "Launch DockDoor at login"))
+                    .settingsSearchTarget("general.launchAtLogin")
 
                 Toggle(isOn: $showMenuBarIcon, label: { Text("Show menu bar icon") })
+                    .settingsSearchTarget("general.menuBarIcon")
                     .onChange(of: showMenuBarIcon) { isOn in
                         let appDelegate = NSApplication.shared.delegate as! AppDelegate
                         if isOn { appDelegate.setupMenuBar() } else { appDelegate.removeMenuBar() }
@@ -54,14 +56,18 @@ struct MainSettingsView: View {
                 )) {
                     Text("Reduce motion")
                 }
+                .settingsSearchTarget("general.reduceMotion")
 
-                Toggle(isOn: $sortMinimizedToEnd, label: {
-                    Text("Sort minimized/hidden windows to end")
-                })
-                Text("Minimized and hidden windows will appear after all visible windows in previews and switcher.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.leading, 20)
+                VStack(alignment: .leading, spacing: 0) {
+                    Toggle(isOn: $sortMinimizedToEnd, label: {
+                        Text("Sort minimized/hidden windows to end")
+                    })
+                    Text("Minimized and hidden windows will appear after all visible windows in previews and switcher.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.leading, 20)
+                }
+                .settingsSearchTarget("general.sortMinimized")
             }
         }
     }
@@ -91,6 +97,7 @@ struct MainSettingsView: View {
                 Defaults[.bufferFromDock] = Defaults.Keys.bufferFromDock.defaultValue
                 Defaults[.shouldHideOnDockItemClick] = Defaults.Keys.shouldHideOnDockItemClick.defaultValue
                 Defaults[.dockClickAction] = Defaults.Keys.dockClickAction.defaultValue
+                Defaults[.restoreAllMinimizedWindowsOnDockClick] = Defaults.Keys.restoreAllMinimizedWindowsOnDockClick.defaultValue
                 Defaults[.enableCmdRightClickQuit] = Defaults.Keys.enableCmdRightClickQuit.defaultValue
                 Defaults[.previewHoverAction] = Defaults.Keys.previewHoverAction.defaultValue
 
@@ -100,6 +107,11 @@ struct MainSettingsView: View {
                 Defaults[.includeHiddenWindowsInSwitcher] = Defaults.Keys.includeHiddenWindowsInSwitcher.defaultValue
                 Defaults[.includeHiddenWindowsInDockPreview] = Defaults.Keys.includeHiddenWindowsInDockPreview.defaultValue
                 Defaults[.includeHiddenWindowsInCmdTab] = Defaults.Keys.includeHiddenWindowsInCmdTab.defaultValue
+                Defaults[.showWindowlessAppsInSwitcher] = Defaults.Keys.showWindowlessAppsInSwitcher.defaultValue
+                Defaults[.showWindowlessAppsInDockPreview] = Defaults.Keys.showWindowlessAppsInDockPreview.defaultValue
+                Defaults[.showWindowlessAppsInCmdTab] = Defaults.Keys.showWindowlessAppsInCmdTab.defaultValue
+                Defaults[.openNewWindowForWindowlessApps] = Defaults.Keys.openNewWindowForWindowlessApps.defaultValue
+                Defaults[.ignoreAppsWithSingleWindowInCmdTab] = Defaults.Keys.ignoreAppsWithSingleWindowInCmdTab.defaultValue
                 Defaults[.useClassicWindowOrdering] = Defaults.Keys.useClassicWindowOrdering.defaultValue
                 Defaults[.limitSwitcherToFrontmostApp] = Defaults.Keys.limitSwitcherToFrontmostApp.defaultValue
                 Defaults[.fullscreenAppBlacklist] = Defaults.Keys.fullscreenAppBlacklist.defaultValue
@@ -134,10 +146,22 @@ struct MainSettingsView: View {
                 Defaults[.searchTriggerKey] = Defaults.Keys.searchTriggerKey.defaultValue
 
                 Defaults[.showSpecialAppControls] = Defaults.Keys.showSpecialAppControls.defaultValue
+                Defaults[.enableDockItemWidgets] = Defaults.Keys.enableDockItemWidgets.defaultValue
+                Defaults[.enableFolderWidget] = Defaults.Keys.enableFolderWidget.defaultValue
+                Defaults[.folderWidgetDefaultSortOrder] = Defaults.Keys.folderWidgetDefaultSortOrder.defaultValue
+                Defaults[.folderWidgetDefaultSortReversed] = Defaults.Keys.folderWidgetDefaultSortReversed.defaultValue
+                Defaults[.folderWidgetRememberSortPerFolder] = Defaults.Keys.folderWidgetRememberSortPerFolder.defaultValue
+                Defaults[.folderWidgetSortOrders] = Defaults.Keys.folderWidgetSortOrders.defaultValue
+                Defaults[.folderWidgetSortReversed] = Defaults.Keys.folderWidgetSortReversed.defaultValue
+                Defaults[.folderWidgetShowHiddenFiles] = Defaults.Keys.folderWidgetShowHiddenFiles.defaultValue
                 Defaults[.showBigControlsWhenNoValidWindows] = Defaults.Keys.showBigControlsWhenNoValidWindows.defaultValue
                 Defaults[.showMassActionButtons] = Defaults.Keys.showMassActionButtons.defaultValue
                 Defaults[.useEmbeddedMediaControls] = Defaults.Keys.useEmbeddedMediaControls.defaultValue
                 Defaults[.enablePinning] = Defaults.Keys.enablePinning.defaultValue
+
+                Defaults[.enableDockLocking] = Defaults.Keys.enableDockLocking.defaultValue
+                Defaults[.lockedDockScreenIdentifier] = Defaults.Keys.lockedDockScreenIdentifier.defaultValue
+                Defaults[.dockLockOverrideModifier] = Defaults.Keys.dockLockOverrideModifier.defaultValue
                 Defaults[.filteredCalendarIdentifiers] = Defaults.Keys.filteredCalendarIdentifiers.defaultValue
                 Defaults[.groupAppInstancesInDock] = Defaults.Keys.groupAppInstancesInDock.defaultValue
 
